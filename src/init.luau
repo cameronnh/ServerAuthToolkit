@@ -20,12 +20,12 @@ local RunService = game:GetService("RunService")
 -- [[ DEPENDENCIES ]] --
 ----------------------------------------------------------------------------------------
 
-local ContextBuilder = require("@self/ContextBuilder")
-local ServerAuthToolkitTypes = require("@self/ServerAuthToolkitTypes")
-local MovementStateAttributes = require("@self/MovementStateAttributes")
-local MovementStateBuilder = require("@self/MovementStateBuilder")
-local IsOnGround = require("@self/IsOnGround")
-local AnimationHelper = require("@self/AnimationHelper")
+local ContextBuilder = require(script.ContextBuilder)
+local ServerAuthToolkitTypes = require(script.ServerAuthToolkitTypes)
+local MovementStateAttributes = require(script.MovementStateAttributes)
+local MovementStateBuilder = require(script.MovementStateBuilder)
+local IsOnGround = require(script.IsOnGround)
+local AnimationHelper = require(script.AnimationHelper)
 
 ----------------------------------------------------------------------------------------
 -- [[ TYPES ]] --

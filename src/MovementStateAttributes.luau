@@ -2,7 +2,7 @@
 -- [[ DEPENDENCIES ]] --
 ----------------------------------------------------------------------------------------
 
-local ServerAuthToolkitTypes = require("@self/ServerAuthToolkitTypes")
+local ServerAuthToolkitTypes = require(script.Parent.ServerAuthToolkitTypes)
 
 ----------------------------------------------------------------------------------------
 -- [[ CONSTANTS ]] --
