@@ -1,9 +1,8 @@
 [package]
 name = "cameronnh/serverauthtoolkit"
-version = "0.1.5"
+version = "0.1.6"
 registry = "https://github.com/UpliftGames/wally-index"
 realm = "shared"
-include = ["default.project.json", "LICENSE", "src", "init.luau"]
 exclude = [
 	".github",
 	".vscode",
@@ -11,7 +10,9 @@ exclude = [
 	"moonwave.toml",
 	"scripts",
 	"README.md",
-	"sourcemap.json"
+	"sourcemap.json",
+	"stylua.toml",
+	"rokit.toml"
 ]
 
 [dependencies]

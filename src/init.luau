@@ -20,12 +20,12 @@ local RunService = game:GetService("RunService")
 -- [[ DEPENDENCIES ]] --
 ----------------------------------------------------------------------------------------
 
-local ContextBuilder = require(script.ContextBuilder)
-local ServerAuthToolkitTypes = require(script.ServerAuthToolkitTypes)
-local MovementStateAttributes = require(script.MovementStateAttributes)
-local MovementStateBuilder = require(script.MovementStateBuilder)
-local IsOnGround = require(script.IsOnGround)
-local AnimationHelper = require(script.AnimationHelper)
+local ContextBuilder = require("@self/ContextBuilder")
+local ServerAuthToolkitTypes = require("@self/ServerAuthToolkitTypes")
+local MovementStateAttributes = require("@self/MovementStateAttributes")
+local MovementStateBuilder = require("@self/MovementStateBuilder")
+local IsOnGround = require("@self/IsOnGround")
+local AnimationHelper = require("@self/AnimationHelper")
 
 ----------------------------------------------------------------------------------------
 -- [[ TYPES ]] --
@@ -88,12 +88,12 @@ local self: ServerAuthToolkit = ServerAuthToolkit
 -- [[ CONSTANTS ]] --
 ----------------------------------------------------------------------------------------
 
-const GET_ROBLOX_CONTEXT_TIMEOUT: number = 5
-const MOVEMENT_CONTEXT_NAME: string = "MovementContext"
-const MOVEMENT_CAMERA_LOOK_ACTION_NAME: string = "MovementCameraLook"
-const MOVEMENT_CAMERA_RELATIVE_ROTATION_ACTION_NAME: string = "MovementCameraRelativeRotation"
-const SIMULATION_CAMERA_LOOK_CAPTURE_PRIORITY_OFFSET: number = 1
-const DEFAULT_POST_CAMERA_VISUAL_PRIORITY_OFFSET: number = 2
+local GET_ROBLOX_CONTEXT_TIMEOUT: number = 5
+local MOVEMENT_CONTEXT_NAME: string = "MovementContext"
+local MOVEMENT_CAMERA_LOOK_ACTION_NAME: string = "MovementCameraLook"
+local MOVEMENT_CAMERA_RELATIVE_ROTATION_ACTION_NAME: string = "MovementCameraRelativeRotation"
+local SIMULATION_CAMERA_LOOK_CAPTURE_PRIORITY_OFFSET: number = 1
+local DEFAULT_POST_CAMERA_VISUAL_PRIORITY_OFFSET: number = 2
 
 ----------------------------------------------------------------------------------------
 -- [[ FIELDS ]] --

@@ -9,7 +9,7 @@ local RunService = game:GetService("RunService")
 -- [[ DEPENDENCIES ]] --
 ----------------------------------------------------------------------------------------
 
-local ServerAuthToolkitTypes = require(script.Parent.ServerAuthToolkitTypes)
+local ServerAuthToolkitTypes = require("@self/ServerAuthToolkitTypes")
 
 ----------------------------------------------------------------------------------------
 -- [[ MODULE & EXPORT ]] --
