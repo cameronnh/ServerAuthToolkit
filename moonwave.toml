@@ -1,0 +1,17 @@
+title = "ServerAuthToolkit"
+gitSourceBranch = "main"
+
+apiCategories = [
+	"Register",
+	"Camera",
+	"States",
+	"Animations",
+	"Utility",
+	"General",
+	"Input Action System",
+	"Callbacks",
+]
+
+[docusaurus]
+url = "https://cameronnh.github.io"
+baseUrl = "/ServerAuthToolkit/"

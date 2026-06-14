@@ -1,3 +1,14 @@
+--[=[
+	@class ServerAuthToolkit
+
+	Server-authoritative movement toolkit for Roblox Input Actions and client
+	prediction.
+
+	Register movement modules and animations, then call `Start` on both the server
+	and client. Modules run each simulation step in priority order and replicate
+	state through root-part attributes.
+]=]
+
 ----------------------------------------------------------------------------------------
 -- [[ ROBLOX SERVICES ]] --
 ----------------------------------------------------------------------------------------
@@ -17,6 +28,16 @@ local IsOnGround = require(script.IsOnGround)
 local AnimationHelper = require(script.AnimationHelper)
 
 ----------------------------------------------------------------------------------------
+-- [[ TYPES ]] --
+----------------------------------------------------------------------------------------
+
+export type MovementState = ServerAuthToolkitTypes.MovementState
+export type AnimationSettings = ServerAuthToolkitTypes.AnimationSettings
+export type MovementModuleDefinition = ServerAuthToolkitTypes.MovementModuleDefinition
+export type PostCameraVisualEntry = ServerAuthToolkitTypes.PostCameraVisualEntry
+export type PreCameraSimulationEntry = ServerAuthToolkitTypes.PreCameraSimulationEntry
+
+----------------------------------------------------------------------------------------
 -- [[ MODULE & EXPORT ]] --
 ----------------------------------------------------------------------------------------
 
@@ -29,6 +50,7 @@ export type ServerAuthToolkit = typeof(ServerAuthToolkit) & {
 		self: ServerAuthToolkit,
 		animations: { [string]: ServerAuthToolkitTypes.AnimationSettings }
 	) -> (),
+	Start: (self: ServerAuthToolkit) -> (),
 
 	--Camera
 	RegisterPreCameraSimulation: (
@@ -54,7 +76,10 @@ export type ServerAuthToolkit = typeof(ServerAuthToolkit) & {
 	IsAnimationPlaying: (self: ServerAuthToolkit, animationName: string) -> boolean,
 	IsAnimationFinished: (self: ServerAuthToolkit, animationName: string) -> boolean,
 
-	Start: (self: ServerAuthToolkit) -> (),
+	--Utility
+	WriteFlatLookDirection: (self: ServerAuthToolkit, rootPart: BasePart, flatLookDirection: Vector3) -> (),
+	ReadFlatLookDirection: (self: ServerAuthToolkit, rootPart: BasePart) -> Vector3,
+	QuantizeFlatDirection: (self: ServerAuthToolkit, flatDirection: Vector3) -> Vector3,
 }
 
 local self: ServerAuthToolkit = ServerAuthToolkit
@@ -806,6 +831,17 @@ end
 -- [[ PUBLIC METHODS ]] --
 ----------------------------------------------------------------------------------------
 
+--[=[
+	Registers a movement module with input actions, default state fields, and a
+	`Process` function.
+
+	Modules run in priority order (lower runs first). Register before `Start`
+	when possible; if already started, active players are updated immediately.
+	Duplicate names are ignored.
+
+	@tag Register
+	@param definition ServerAuthToolkitTypes.MovementModuleDefinition -- Module definition to register
+]=]
 function ServerAuthToolkit.RegisterDefinition(
 	self: ServerAuthToolkit,
 	definition: ServerAuthToolkitTypes.MovementModuleDefinition
@@ -833,6 +869,20 @@ function ServerAuthToolkit.RegisterDefinition(
 	end
 end
 
+--[=[
+	Registers a callback that runs on the client before movement simulation each
+	frame.
+
+	Use for client-only setup that must happen before input is applied. Callbacks
+	run in registration order. Server calls log a warning and return a no-op
+	unregister function.
+
+	@client
+	@tag Camera
+	@param callbackName string -- Unique name for this callback
+	@param callback ServerAuthToolkitTypes.PreCameraSimulationCallback -- Called each pre-simulation step with deltaTime
+	@return () -> () -- Unregisters the callback
+]=]
 function ServerAuthToolkit.RegisterPreCameraSimulation(
 	self: ServerAuthToolkit,
 	callbackName: string,
@@ -861,6 +911,20 @@ function ServerAuthToolkit.RegisterPreCameraSimulation(
 	end
 end
 
+--[=[
+	Registers a visual callback that runs on the client after the camera updates.
+
+	Use for camera shake, FOV changes, or other effects that should not affect
+	movement simulation. Server calls log a warning and return a no-op unregister
+	function.
+
+	@client
+	@tag Camera
+	@param callbackName string -- Unique name for this callback
+	@param callback ServerAuthToolkitTypes.PostCameraVisualCallback -- Called each render step with deltaTime
+	@param renderPriorityOffset number? -- Offset from camera render priority. Defaults to 2
+	@return () -> () -- Unregisters the callback
+]=]
 function ServerAuthToolkit.RegisterPostCameraVisualEffect(
 	self: ServerAuthToolkit,
 	callbackName: string,
@@ -893,6 +957,16 @@ function ServerAuthToolkit.RegisterPostCameraVisualEffect(
 	end
 end
 
+--[=[
+	Returns the camera CFrame captured for client movement simulation.
+
+	The toolkit stores this after the camera updates so simulation uses a stable
+	camera state. Returns nil on the server or before a capture exists.
+
+	@client
+	@tag Camera
+	@return CFrame? -- The stored simulation camera CFrame
+]=]
 function ServerAuthToolkit.GetStoredSimulationCameraBaseCFrame(self: ServerAuthToolkit): CFrame?
 	if not IsClient then
 		return nil
@@ -901,6 +975,16 @@ function ServerAuthToolkit.GetStoredSimulationCameraBaseCFrame(self: ServerAuthT
 	return StoredSimulationCameraBaseCFrame
 end
 
+--[=[
+	Resets a player's custom movement state fields to the merged defaults from
+	all registered modules.
+
+	Only fields from module `NeededStates` are reset. Built-in fields like
+	`Character` and `RootPart` are not changed.
+
+	@tag States
+	@param playerMovementState ServerAuthToolkitTypes.MovementState -- The movement state to reset
+]=]
 function ServerAuthToolkit.ResetNeededStates(
 	self: ServerAuthToolkit,
 	playerMovementState: ServerAuthToolkitTypes.MovementState
@@ -908,6 +992,16 @@ function ServerAuthToolkit.ResetNeededStates(
 	MovementStateBuilder:ResetNeededStates(playerMovementState, MergedNeededStates)
 end
 
+--[=[
+	Returns the local player's movement state table.
+
+	This is the same table updated each simulation step by registered modules.
+	Returns nil on the server.
+
+	@client
+	@tag States
+	@return ServerAuthToolkitTypes.MovementState? -- The local player's movement state
+]=]
 function ServerAuthToolkit.GetLocalMovementState(self: ServerAuthToolkit): ServerAuthToolkitTypes.MovementState?
 	if not IsClient then
 		return nil
@@ -916,6 +1010,15 @@ function ServerAuthToolkit.GetLocalMovementState(self: ServerAuthToolkit): Serve
 	return MovementStates[Players.LocalPlayer]
 end
 
+--[=[
+	Registers animations for use with the animation API.
+
+	Each name maps to playback settings used by `PlayAnimation`, `StopAnimation`,
+	and the animation query methods.
+
+	@tag Register
+	@param animations { [string]: ServerAuthToolkitTypes.AnimationSettings } -- Animation names to settings
+]=]
 function ServerAuthToolkit.RegisterAnimations(
 	self: ServerAuthToolkit,
 	animations: { [string]: ServerAuthToolkitTypes.AnimationSettings }
@@ -925,22 +1028,108 @@ function ServerAuthToolkit.RegisterAnimations(
 	end
 end
 
+--[=[
+	Plays a registered animation.
+
+	The animation must be registered first with `RegisterAnimations`.
+
+	@tag Animations
+	@param animationName string -- The animation to play
+	@param speedOverride number? -- Optional playback speed. Uses registered speed if omitted
+]=]
 function ServerAuthToolkit.PlayAnimation(self: ServerAuthToolkit, animationName: string, speedOverride: number?): ()
 	AnimationHelper:PlayAnimation(animationName, speedOverride)
 end
 
+--[=[
+	Stops a registered animation.
+
+	Uses the registered stop fade time when blending out.
+
+	@tag Animations
+	@param animationName string -- The animation to stop
+]=]
 function ServerAuthToolkit.StopAnimation(self: ServerAuthToolkit, animationName: string): ()
 	AnimationHelper:StopAnimation(animationName)
 end
 
+--[=[
+	Returns whether a registered animation is currently playing.
+
+	@tag Animations
+	@param animationName string -- The animation to check
+	@return boolean -- True if the animation is playing
+]=]
 function ServerAuthToolkit.IsAnimationPlaying(self: ServerAuthToolkit, animationName: string): boolean
 	return AnimationHelper:IsAnimationPlaying(animationName)
 end
 
+--[=[
+	Returns whether a non-looped animation has finished playing.
+
+	Looped animations always return false.
+
+	@tag Animations
+	@param animationName string -- The animation to check
+	@return boolean -- True if the animation has finished
+]=]
 function ServerAuthToolkit.IsAnimationFinished(self: ServerAuthToolkit, animationName: string): boolean
 	return AnimationHelper:IsAnimationFinished(animationName)
 end
 
+--[=[
+	Stores a flat look direction on a root part for replication.
+
+	The toolkit reads this at the end of each simulation step to orient the
+	character. The Y component should usually be zero.
+
+	@tag Utility
+	@param rootPart BasePart -- The character root part
+	@param flatLookDirection Vector3 -- The horizontal look direction in world space
+]=]
+function ServerAuthToolkit.WriteFlatLookDirection(
+	self: ServerAuthToolkit,
+	rootPart: BasePart,
+	flatLookDirection: Vector3
+): ()
+	MovementStateAttributes:WriteFlatLookDirection(rootPart, flatLookDirection)
+end
+
+--[=[
+	Reads the flat look direction stored on a root part.
+
+	Returns `Vector3.new(0, 0, -1)` if no direction has been stored.
+
+	@tag Utility
+	@param rootPart BasePart -- The character root part
+	@return Vector3 -- The stored flat look direction
+]=]
+function ServerAuthToolkit.ReadFlatLookDirection(self: ServerAuthToolkit, rootPart: BasePart): Vector3
+	return MovementStateAttributes:ReadFlatLookDirection(rootPart)
+end
+
+--[=[
+	Rounds a flat direction to a fixed yaw step for stable network replication.
+
+	Yaw is quantized to 0.25 degree steps. Useful before calling
+	`WriteFlatLookDirection`.
+
+	@tag Utility
+	@param flatDirection Vector3 -- The direction to quantize
+	@return Vector3 -- The quantized direction on the horizontal plane
+]=]
+function ServerAuthToolkit.QuantizeFlatDirection(self: ServerAuthToolkit, flatDirection: Vector3): Vector3
+	return MovementStateAttributes:QuantizeFlatDirection(flatDirection)
+end
+
+--[=[
+	Starts movement simulation, player lifecycle handling, and the animation helper.
+
+	Call once on the server and once on the client after registering modules.
+	Safe to call multiple times; later calls do nothing.
+
+	@tag Register
+]=]
 function ServerAuthToolkit.Start(self: ServerAuthToolkit): ()
 	if Started then
 		return
