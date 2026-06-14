@@ -1,5 +1,9 @@
 {
-    "aliases": {},
+    "aliases": {
+        "Server": "src/Server",
+        "Client": "src/Client",
+        "Shared": "src/Shared"
+    },
     "languageMode": "strict",
     "typeErrors": true,
     "lint": {
