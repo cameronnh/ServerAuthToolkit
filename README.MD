@@ -1,6 +1,12 @@
+<div align="center">
+	<h1>ServerAuthToolkit</h1>
+	<p>Server-authoritative movement toolkit for Roblox Input Actions and client prediction.</p>
+	<a href="https://cameronnh.github.io/ServerAuthToolkit/"><strong>View docs</strong></a>
+</div>
+<!--moonwave-hide-before-this-line-->
 # ServerAuthToolkit
 
-Server-authoritative movement toolkit for Roblox experiences using [Input Actions](https://create.roblox.com/docs/input/input-actions) and client-side prediction.
+Server-authoritative movement toolkit for Roblox games using Input Actions System and client-side prediction.
 
 Register movement modules that define input, default state, and simulation logic. The toolkit handles player lifecycle, runs modules each simulation step, and replicates movement state through root-part attributes.
 
@@ -9,7 +15,7 @@ Register movement modules that define input, default state, and simulation logic
 Add the package with [Wally](https://wally.run/):
 
 ```toml
-ServerAuthToolkit = "cameronnh/serverauthtoolkit@0.1.1"
+ServerAuthToolkit = "cameronnh/serverauthtoolkit@0.1.2"
 ```
 
 ## Quick start
@@ -20,12 +26,34 @@ Require the toolkit on both the server and client, register your modules, then s
 local ServerAuthToolkit = require(ReplicatedStorage.ServerAuthToolkit)
 
 ServerAuthToolkit:RegisterDefinition({
-	Name = "Movement",
+	Name = "Jump",
 	Priority = 1,
-	Actions = { /* ... */ },
-	NeededStates = { Speed = 16 },
+	Actions = {
+		{
+			Name = "Jump",
+			Type = Enum.InputActionType.Bool,
+			Bindings = {
+				Keyboard = {
+					KeyCode = Enum.KeyCode.Space,
+				},
+				Gamepad = {
+					KeyCode = Enum.KeyCode.ButtonA,
+				},
+			},
+			ApplyInput = function(state: ServerAuthToolkit.MovementState, inputState: boolean)
+				state.IsJumping = inputState
+			end,
+		},
+	},
+	NeededStates = {
+		IsJumping = false,
+		OnGround = false,
+	},
+	Disable = {
+		"JumpAction",
+	},
 	Process = function(state, deltaTime)
-		-- movement logic
+		-- Jump logic
 	end,
 })
 
@@ -33,12 +61,6 @@ ServerAuthToolkit:Start()
 ```
 
 Call `Start` once per process after registering modules and animations.
-
-## Documentation
-
-Browse the full API reference for types, methods, and usage details:
-
-**[API Reference →](/api/ServerAuthToolkit)**
 
 ## Features
 

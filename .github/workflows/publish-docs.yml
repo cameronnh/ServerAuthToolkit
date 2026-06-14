@@ -20,6 +20,9 @@ jobs:
 
       - run: npm i -g moonwave@latest
 
+      - name: Sync Wally version into README
+        run: node scripts/sync-readme-wally.mjs
+
       - name: Publish to gh-pages
         run: |
           git remote set-url origin https://git:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git
