@@ -4,10 +4,6 @@
 	<a href="https://cameronnh.github.io/ServerAuthToolkit/"><strong>View docs</strong></a>
 </div>
 <!--moonwave-hide-before-this-line-->
-# ServerAuthToolkit
-
-Server-authoritative movement toolkit for Roblox games using Input Actions System and client-side prediction.
-
 Register movement modules that define input, default state, and simulation logic. The toolkit handles player lifecycle, runs modules each simulation step, and replicates movement state through root-part attributes.
 
 ## Installation
