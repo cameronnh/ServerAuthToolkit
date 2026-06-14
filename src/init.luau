@@ -80,6 +80,13 @@ export type ServerAuthToolkit = typeof(ServerAuthToolkit) & {
 	WriteFlatLookDirection: (self: ServerAuthToolkit, rootPart: BasePart, flatLookDirection: Vector3) -> (),
 	ReadFlatLookDirection: (self: ServerAuthToolkit, rootPart: BasePart) -> Vector3,
 	QuantizeFlatDirection: (self: ServerAuthToolkit, flatDirection: Vector3) -> Vector3,
+	Teleport: (
+		self: ServerAuthToolkit,
+		player: Player,
+		targetCFrame: CFrame,
+		modifyState: ((state: ServerAuthToolkitTypes.MovementState) -> ())?,
+		preserveLookDirection: boolean?
+	) -> boolean,
 }
 
 local self: ServerAuthToolkit = ServerAuthToolkit
@@ -867,6 +874,81 @@ function ServerAuthToolkit.RegisterDefinition(
 			bindSimulationCameraLookCapture()
 		end
 	end
+end
+
+--[=[
+	Teleports a player's character to a target CFrame with server authority.
+
+	Server-only. Sets the root part CFrame and replicates the new state so
+	predicting clients roll back to it.
+
+	The toolkit does not assume any module-specific state fields. Pass
+	`modifyState` to mutate the player's authoritative movement state before it is
+	captured to attributes (for example, zeroing a module's `Velocity` so the
+	character does not keep its momentum after the move). The callback runs after
+	the position is resolved and before replication.
+
+	@server
+	@tag Utility
+	@param player Player -- The player whose character to teleport
+	@param targetCFrame CFrame -- Destination CFrame; position is used, facing is flattened
+	@param modifyState ((state: MovementState) -> ())? -- Optional hook to mutate the movement state before replication
+	@param preserveLookDirection boolean? -- When true, keeps the current facing instead of using targetCFrame
+	@return boolean -- True if the teleport was applied
+]=]
+function ServerAuthToolkit.Teleport(
+	self: ServerAuthToolkit,
+	player: Player,
+	targetCFrame: CFrame,
+	modifyState: ((state: ServerAuthToolkitTypes.MovementState) -> ())?,
+	preserveLookDirection: boolean?
+): boolean
+	if not IsServer then
+		warn(`[ServerAuthToolkit] Teleport is server-only ({player.Name})`)
+		return false
+	end
+
+	local playerMovementState: ServerAuthToolkitTypes.MovementState? = MovementStates[player]
+
+	if not playerMovementState then
+		warn(`[ServerAuthToolkit] Cannot teleport "{player.Name}": no movement state`)
+		return false
+	end
+
+	local rootPart: BasePart? = playerMovementState.RootPart
+
+	if not rootPart or not rootPart.Parent then
+		warn(`[ServerAuthToolkit] Cannot teleport "{player.Name}": no root part`)
+		return false
+	end
+
+	if modifyState then
+		modifyState(playerMovementState)
+	end
+
+	local flatLookDirection: Vector3 = Vector3.new(targetCFrame.LookVector.X, 0, targetCFrame.LookVector.Z)
+	local targetPosition: Vector3 = targetCFrame.Position
+	local uprightCFrame: CFrame
+
+	if flatLookDirection.Magnitude > 0.001 then
+		flatLookDirection = MovementStateAttributes:QuantizeFlatDirection(flatLookDirection.Unit)
+		uprightCFrame = CFrame.lookAt(targetPosition, targetPosition + flatLookDirection)
+	else
+		uprightCFrame = CFrame.new(targetPosition)
+		flatLookDirection = Vector3.zero
+	end
+
+	rootPart.CFrame = uprightCFrame
+	rootPart.AssemblyLinearVelocity = Vector3.zero
+	rootPart.AssemblyAngularVelocity = Vector3.zero
+
+	if not preserveLookDirection and flatLookDirection.Magnitude > 0.001 then
+		MovementStateAttributes:WriteFlatLookDirection(rootPart, flatLookDirection)
+	end
+
+	MovementStateAttributes:CaptureFromMovementState(rootPart, playerMovementState)
+
+	return true
 end
 
 --[=[
