@@ -1,11 +1,6 @@
 {
-	"name": "server-auth-toolkit",
+	"name": "serverauthtoolkit",
 	"tree": {
-	  "$className": "DataModel",
-	  "ReplicatedStorage": {
-		"$className": "ReplicatedStorage",
-		"ServerAuthToolkit": {"$path": "./src"}
-	  }
+	  "$path": "src"
 	}
   }
-  
