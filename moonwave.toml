@@ -15,3 +15,4 @@ apiCategories = [
 [docusaurus]
 url = "https://cameronnh.github.io"
 baseUrl = "/ServerAuthToolkit/"
+tagline = "Server-authoritative movement for Roblox Input Actions and client prediction"
