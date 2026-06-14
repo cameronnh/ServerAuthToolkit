@@ -39,8 +39,8 @@ local self: AnimationHelper = AnimationHelper
 -- [[ CONSTANTS ]] --
 ----------------------------------------------------------------------------------------
 
-local ANIMATION_ATTRIBUTE_PREFIX: string = "ServerAuthToolkitAnim_"
-local ONE_SHOT_FINISH_PLAYTHROUGH: number = 0.98
+const ANIMATION_ATTRIBUTE_PREFIX: string = "ServerAuthToolkitAnim_"
+const ONE_SHOT_FINISH_PLAYTHROUGH: number = 0.98
 
 ----------------------------------------------------------------------------------------
 -- [[ FIELDS ]] --

@@ -47,7 +47,7 @@ export type ContextBuilder = {
 -- [[ CONSTANTS ]] --
 ----------------------------------------------------------------------------------------
 
-local DEFAULT_PRIORITY: number = 1000
+const DEFAULT_PRIORITY: number = 1000
 
 ----------------------------------------------------------------------------------------
 -- [[ LOCAL METHODS ]] --
