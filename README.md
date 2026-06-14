@@ -1,10 +1,10 @@
-<div align="center" style="margin-bottom: 2rem;">
+<div align="center">
 	<h1>ServerAuthToolkit</h1>
 	<p>Server-authoritative movement toolkit for Roblox Input Actions and client prediction.</p>
 	<a href="https://cameronnh.github.io/ServerAuthToolkit/"><strong>View docs</strong></a>
 </div>
+<br />
 <!--moonwave-hide-before-this-line-->
-
 
 Register movement modules that define input, default state, and simulation logic. The toolkit handles player lifecycle, runs modules each simulation step, and replicates movement state through root-part attributes.
 
@@ -13,7 +13,7 @@ Register movement modules that define input, default state, and simulation logic
 Add the package with [Wally](https://wally.run/):
 
 ```toml
-ServerAuthToolkit = "cameronnh/serverauthtoolkit@0.1.2"
+ServerAuthToolkit = "cameronnh/serverauthtoolkit@0.1.3"
 ```
 
 ## Quick start
