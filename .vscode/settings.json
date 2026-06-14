@@ -1,0 +1,13 @@
+{
+	"luau-lsp.completion.imports.stringRequires.enabled": true,
+	"luau-lsp.sourcemap.enabled": true,
+	"luau-lsp.sourcemap.rojoProjectFile": "default.project.json",
+	"luau-lsp.sourcemap.autogenerate": true,
+	"[luau]": {
+		"editor.defaultFormatter": "JohnnyMorganz.stylua",
+		"editor.formatOnSave": true,
+		"editor.suggest.showSnippets": true,
+		"editor.snippetSuggestions": "top",
+	},
+	"stylua.targetReleaseVersion": "latest"
+}
