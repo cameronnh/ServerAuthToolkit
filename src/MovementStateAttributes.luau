@@ -15,6 +15,12 @@ const FLAT_LOOK_DIRECTION_ATTRIBUTE_NAME: string = `{ATTRIBUTE_PREFIX}FlatLookDi
 const DEFAULT_FLAT_LOOK_DIRECTION: Vector3 = Vector3.new(0, 0, -1)
 const YAW_QUANTIZATION_STEP: number = math.rad(0.25)
 
+-- Ground state (OnGround/GroundNormal/GroundHeight) is deliberately not
+-- replicated. It is recomputed at the top of every simulation step before any
+-- module reads it, so it costs nothing to leave out, and the per-instance
+-- attribute payload is limited to 1024 bytes -- a Vector3 ground normal alone
+-- is enough to overflow it. Ground detection instead keeps its cross-step
+-- decisions rollback-safe by deriving them from the replicated Velocity.
 const EXCLUDED_STATE_NAMES: { [string]: boolean } = {
 	Character = true,
 	Humanoid = true,
@@ -22,6 +28,7 @@ const EXCLUDED_STATE_NAMES: { [string]: boolean } = {
 	CameraLookVector = true,
 	OnGround = true,
 	GroundNormal = true,
+	GroundHeight = true,
 }
 
 ----------------------------------------------------------------------------------------

@@ -5,7 +5,7 @@
 export type NeededStatesDefaults = { [string]: any }
 
 --[=[
-	@type MovementState { Character: Model?, Humanoid: Humanoid?, RootPart: BasePart?, CameraLookVector: Vector3?, OnGround: boolean?, GroundNormal: Vector3?, [string]: any }
+	@type MovementState { Character: Model?, Humanoid: Humanoid?, RootPart: BasePart?, CameraLookVector: Vector3?, OnGround: boolean?, GroundNormal: Vector3?, GroundHeight: number?, [string]: any }
 	@within ServerAuthToolkit
 	@tag General
 
@@ -19,6 +19,7 @@ export type MovementState = {
 	CameraLookVector: Vector3?,
 	OnGround: boolean?,
 	GroundNormal: Vector3?,
+	GroundHeight: number?,
 	[string]: any,
 }
 

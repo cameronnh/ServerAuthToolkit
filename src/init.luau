@@ -83,6 +83,8 @@ export type ServerAuthToolkit = typeof(ServerAuthToolkit) & {
 	WriteFlatLookDirection: (self: ServerAuthToolkit, rootPart: BasePart, flatLookDirection: Vector3) -> (),
 	ReadFlatLookDirection: (self: ServerAuthToolkit, rootPart: BasePart) -> Vector3,
 	QuantizeFlatDirection: (self: ServerAuthToolkit, flatDirection: Vector3) -> Vector3,
+	GetRootStandHeight: (self: ServerAuthToolkit, state: ServerAuthToolkitTypes.MovementState) -> number?,
+	GetMaxStepHeight: (self: ServerAuthToolkit) -> number,
 	Teleport: (
 		self: ServerAuthToolkit,
 		player: Player,
@@ -566,9 +568,10 @@ local function runDefinitionsForState(
 
 	syncDefinitionInputsFromInput(player, state)
 
-	local onGround: boolean, groundNormal: Vector3 = IsOnGround:Get(state)
+	local onGround: boolean, groundNormal: Vector3, groundHeight: number? = IsOnGround:Get(state)
 	state.OnGround = onGround
 	state.GroundNormal = groundNormal
+	state.GroundHeight = groundHeight
 
 	AnimationHelper:SetProcessingRootPart(state.RootPart)
 
@@ -1248,6 +1251,39 @@ end
 ]=]
 function ServerAuthToolkit.QuantizeFlatDirection(self: ServerAuthToolkit, flatDirection: Vector3): Vector3
 	return MovementStateAttributes:QuantizeFlatDirection(flatDirection)
+end
+
+--[=[
+	Returns the expected distance from the character's root part center to the
+	ground, derived from the humanoid rig (hip height, root size, and leg size
+	for R6 rigs).
+
+	Useful for modules that manage vertical placement against `GroundHeight`.
+	Returns nil when the state has no character.
+
+	@tag Utility
+	@param state ServerAuthToolkitTypes.MovementState -- The movement state to measure
+	@return number? -- Root center height above the ground when standing
+]=]
+function ServerAuthToolkit.GetRootStandHeight(
+	self: ServerAuthToolkit,
+	state: ServerAuthToolkitTypes.MovementState
+): number?
+	return IsOnGround:GetRootStandHeight(state)
+end
+
+--[=[
+	Returns the maximum ledge height ground detection treats as a walkable step.
+
+	Grounded characters stay grounded across ledges up to this height, so
+	modules that snap or glide the character vertically should use the same
+	limit.
+
+	@tag Utility
+	@return number -- Maximum step height in studs
+]=]
+function ServerAuthToolkit.GetMaxStepHeight(self: ServerAuthToolkit): number
+	return IsOnGround:GetMaxStepHeight()
 end
 
 --[=[
