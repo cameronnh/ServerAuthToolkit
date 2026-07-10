@@ -1,6 +1,6 @@
 [package]
 name = "cameronnh/serverauthtoolkit"
-version = "0.1.9"
+version = "0.2.01"
 registry = "https://github.com/UpliftGames/wally-index"
 realm = "shared"
 exclude = [
