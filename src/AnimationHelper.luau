@@ -24,9 +24,11 @@ export type AnimationHelper = typeof(AnimationHelper) & {
 		animationSettings: ServerAuthToolkitTypes.AnimationSettings
 	) -> (),
 	PlayAnimation: (self: AnimationHelper, animationName: string, speedOverride: number?) -> (),
-	StopAnimation: (self: AnimationHelper, animationName: string) -> (),
+	StopAnimation: (self: AnimationHelper, animationName: string, stopFadeTimeOverride: number?) -> (),
+	StopAnimationInterrupt: (self: AnimationHelper, animationName: string) -> (),
 	IsAnimationPlaying: (self: AnimationHelper, animationName: string) -> boolean,
 	IsAnimationFinished: (self: AnimationHelper, animationName: string) -> boolean,
+	GetLoadedTrackLength: (self: AnimationHelper, rootPart: BasePart, animationName: string) -> number?,
 
 	SetProcessingRootPart: (self: AnimationHelper, rootPart: BasePart?) -> (),
 	Start: (self: AnimationHelper) -> (),
@@ -53,6 +55,7 @@ local AlreadyPlayingAnimations: { [string]: boolean } = {}
 local ProcessingCharacterState: ServerAuthToolkitTypes.CharacterAnimationState? = nil
 local SimulationBound: boolean = false
 local PendingSpeedOverrides: { [string]: number } = {}
+local PendingStopFadeOverrides: { [BasePart]: { [string]: number } } = {}
 local LoopedAnimationTimePositions: { [BasePart]: { [string]: number } } = {}
 local LoopedTrackWasPlaying: { [BasePart]: { [string]: boolean } } = {}
 local IsClient: boolean = RunService:IsClient()
@@ -95,7 +98,9 @@ local function initializeLocalDesiredAnimations(rootPart: BasePart): ()
 	local desiredState: { [string]: boolean } = {}
 
 	for animationName: string, _: ServerAuthToolkitTypes.AnimationSettings in Animations do
-		desiredState[animationName] = isAlreadyPlaying(animationName)
+		if isAlreadyPlaying(animationName) then
+			desiredState[animationName] = true
+		end
 	end
 
 	LocalDesiredAnimations[rootPart] = desiredState
@@ -115,12 +120,16 @@ local function getDesiredAnimationShouldPlay(rootPart: BasePart, animationName: 
 	return getAnimationAttributeHolder(rootPart):GetAttribute(getAnimationAttributeName(animationName)) :: boolean?
 end
 
-local function setDesiredAnimationShouldPlay(rootPart: BasePart, animationName: string, shouldPlay: boolean): ()
+local function setDesiredAnimationShouldPlay(rootPart: BasePart, animationName: string, shouldPlay: boolean?): ()
 	if usesLocalAnimationAuthority(rootPart) then
 		local desiredState: { [string]: boolean }? = LocalDesiredAnimations[rootPart]
 
 		if desiredState then
-			desiredState[animationName] = shouldPlay
+			if shouldPlay == true then
+				desiredState[animationName] = true
+			else
+				desiredState[animationName] = nil
+			end
 		end
 
 		return
@@ -142,11 +151,7 @@ local function getOrCreateAnimator(humanoid: Humanoid): Animator?
 	return newAnimator
 end
 
-local function rememberLoopedTimePosition(
-	rootPart: BasePart,
-	animationName: string,
-	animationTrack: AnimationTrack
-): ()
+local function rememberLoopedTimePosition(rootPart: BasePart, animationName: string, animationTrack: AnimationTrack): ()
 	if animationTrack.Length <= 0 then
 		return
 	end
@@ -228,7 +233,7 @@ local function loadAnimationTrack(
 	if animationSettings.Looped ~= true then
 		animationTrack.Ended:Connect(function()
 			characterState.oneShotFinished[animationName] = true
-			setDesiredAnimationShouldPlay(characterState.rootPart, animationName, false)
+			setDesiredAnimationShouldPlay(characterState.rootPart, animationName, nil)
 		end)
 	end
 
@@ -311,6 +316,31 @@ local function playAnimationTrack(
 	end
 end
 
+local function setPendingStopFadeOverride(rootPart: BasePart, animationName: string, stopFadeTime: number): ()
+	local overridesByAnimation: { [string]: number } = PendingStopFadeOverrides[rootPart]
+
+	if not overridesByAnimation then
+		overridesByAnimation = {}
+		PendingStopFadeOverrides[rootPart] = overridesByAnimation
+	end
+
+	overridesByAnimation[animationName] = stopFadeTime
+end
+
+local function consumePendingStopFadeOverride(rootPart: BasePart, animationName: string): number?
+	local overridesByAnimation: { [string]: number }? = PendingStopFadeOverrides[rootPart]
+
+	if not overridesByAnimation then
+		return nil
+	end
+
+	local stopFadeTime: number? = overridesByAnimation[animationName]
+
+	overridesByAnimation[animationName] = nil
+
+	return stopFadeTime
+end
+
 local function stopAnimationTrack(
 	characterState: ServerAuthToolkitTypes.CharacterAnimationState,
 	animationName: string,
@@ -326,33 +356,29 @@ local function stopAnimationTrack(
 		return
 	end
 
-	animationTrack:Stop(animationSettings.StopFadeTime)
+	local pendingStopFadeTime: number? = consumePendingStopFadeOverride(characterState.rootPart, animationName)
+	local stopFadeTime: number = pendingStopFadeTime or animationSettings.StopFadeTime
+
+	animationTrack:Stop(stopFadeTime)
 end
 
 local function syncCharacterAnimationState(characterState: ServerAuthToolkitTypes.CharacterAnimationState): ()
-	for animationName: string, animationSettings: ServerAuthToolkitTypes.AnimationSettings in Animations do
-		local shouldPlay: boolean? = getDesiredAnimationShouldPlay(characterState.rootPart, animationName)
-
-		if shouldPlay ~= false then
-			continue
-		end
-
-		stopAnimationTrack(characterState, animationName, animationSettings)
-	end
+	local replicateStopsFromAttributes: boolean = not usesLocalAnimationAuthority(characterState.rootPart)
 
 	for animationName: string, animationSettings: ServerAuthToolkitTypes.AnimationSettings in Animations do
 		local shouldPlay: boolean? = getDesiredAnimationShouldPlay(characterState.rootPart, animationName)
+		local animationTrack: AnimationTrack? = characterState.tracks[animationName]
 
-		if shouldPlay ~= true then
-			continue
+		if shouldPlay == true then
+			if not animationSettings.Looped and characterState.oneShotFinished[animationName] == true then
+				setDesiredAnimationShouldPlay(characterState.rootPart, animationName, nil)
+				continue
+			end
+
+			playAnimationTrack(characterState, animationName, animationSettings)
+		elseif replicateStopsFromAttributes and animationTrack and animationTrack.IsPlaying then
+			stopAnimationTrack(characterState, animationName, animationSettings)
 		end
-
-		if not animationSettings.Looped and characterState.oneShotFinished[animationName] == true then
-			setDesiredAnimationShouldPlay(characterState.rootPart, animationName, false)
-			continue
-		end
-
-		playAnimationTrack(characterState, animationName, animationSettings)
 	end
 end
 
@@ -380,11 +406,11 @@ local function bindAnimationSimulation(): ()
 	RunService:BindToSimulation(stepAnimationSimulation, Enum.StepFrequency.Hz60)
 end
 
-local function setPlayingAnimationState(rootPart: BasePart?, animationName: string, shouldPlay: boolean): ()
+local function setPlayingAnimationState(rootPart: BasePart?, animationName: string, shouldPlay: boolean?): ()
 	if rootPart then
 		local characterState: ServerAuthToolkitTypes.CharacterAnimationState? = CharacterStates[rootPart]
 
-		if shouldPlay and characterState then
+		if shouldPlay == true and characterState then
 			local animationSettings: ServerAuthToolkitTypes.AnimationSettings? = Animations[animationName]
 			local animationTrack: AnimationTrack? = characterState.tracks[animationName]
 
@@ -404,8 +430,12 @@ local function setPlayingAnimationState(rootPart: BasePart?, animationName: stri
 
 				animationTrack.TimePosition = 0
 			end
-		elseif not shouldPlay and characterState then
+		elseif shouldPlay ~= true and characterState then
 			local animationSettings: ServerAuthToolkitTypes.AnimationSettings? = Animations[animationName]
+
+			if animationSettings then
+				stopAnimationTrack(characterState, animationName, animationSettings)
+			end
 
 			if animationSettings and animationSettings.Looped == true then
 				clearLoopedTrackResumeState(rootPart, animationName)
@@ -414,16 +444,22 @@ local function setPlayingAnimationState(rootPart: BasePart?, animationName: stri
 			end
 		end
 
-		setDesiredAnimationShouldPlay(rootPart, animationName, shouldPlay)
+		setDesiredAnimationShouldPlay(rootPart, animationName, if shouldPlay == true then true else nil)
 		return
 	end
 
-	AlreadyPlayingAnimations[animationName] = shouldPlay
+	if shouldPlay == true then
+		AlreadyPlayingAnimations[animationName] = true
+	else
+		AlreadyPlayingAnimations[animationName] = nil
+	end
 end
 
 local function applyAlreadyPlayingAnimations(characterState: ServerAuthToolkitTypes.CharacterAnimationState): ()
 	for animationName: string, _: ServerAuthToolkitTypes.AnimationSettings in Animations do
-		setDesiredAnimationShouldPlay(characterState.rootPart, animationName, isAlreadyPlaying(animationName))
+		if isAlreadyPlaying(animationName) then
+			setDesiredAnimationShouldPlay(characterState.rootPart, animationName, true)
+		end
 	end
 end
 
@@ -438,13 +474,12 @@ function AnimationHelper.RegisterAnimation(
 ): ()
 	Animations[animationName] = animationSettings
 
-	if AlreadyPlayingAnimations[animationName] == nil then
-		AlreadyPlayingAnimations[animationName] = false
-	end
-
 	for _: BasePart, characterState: ServerAuthToolkitTypes.CharacterAnimationState in CharacterStates do
 		loadAnimationTrack(characterState, animationName, animationSettings)
-		setDesiredAnimationShouldPlay(characterState.rootPart, animationName, isAlreadyPlaying(animationName))
+
+		if isAlreadyPlaying(animationName) then
+			setDesiredAnimationShouldPlay(characterState.rootPart, animationName, true)
+		end
 	end
 end
 
@@ -471,14 +506,34 @@ function AnimationHelper.PlayAnimation(self: AnimationHelper, animationName: str
 	setPlayingAnimationState(rootPart, animationName, true)
 end
 
-function AnimationHelper.StopAnimation(self: AnimationHelper, animationName: string): ()
+function AnimationHelper.StopAnimation(self: AnimationHelper, animationName: string, stopFadeTimeOverride: number?): ()
 	if not Animations[animationName] then
 		warn(`[AnimationHelper] Attempted to stop unregistered animation "{animationName}"`)
 		return
 	end
 
 	local rootPart: BasePart? = ProcessingCharacterState and ProcessingCharacterState.rootPart or nil
-	setPlayingAnimationState(rootPart, animationName, false)
+
+	if rootPart and stopFadeTimeOverride ~= nil then
+		setPendingStopFadeOverride(rootPart, animationName, stopFadeTimeOverride)
+	end
+
+	setPlayingAnimationState(rootPart, animationName, nil)
+end
+
+function AnimationHelper.StopAnimationInterrupt(self: AnimationHelper, animationName: string): ()
+	local animationSettings: ServerAuthToolkitTypes.AnimationSettings? = Animations[animationName]
+
+	if not animationSettings then
+		warn(`[AnimationHelper] Attempted to interrupt unregistered animation "{animationName}"`)
+		return
+	end
+
+	local interruptStopFadeTime: number = if animationSettings.InterruptStopFadeTime ~= nil
+		then animationSettings.InterruptStopFadeTime
+		else 0
+
+	self:StopAnimation(animationName, interruptStopFadeTime)
 end
 
 function AnimationHelper.IsAnimationPlaying(self: AnimationHelper, animationName: string): boolean
@@ -515,6 +570,22 @@ function AnimationHelper.IsAnimationFinished(self: AnimationHelper, animationNam
 	local playthrough: number = animationTrack.TimePosition / animationTrack.Length
 
 	return playthrough >= ONE_SHOT_FINISH_PLAYTHROUGH
+end
+
+function AnimationHelper.GetLoadedTrackLength(self: AnimationHelper, rootPart: BasePart, animationName: string): number?
+	local characterState: ServerAuthToolkitTypes.CharacterAnimationState? = CharacterStates[rootPart]
+
+	if not characterState then
+		return nil
+	end
+
+	local animationTrack: AnimationTrack? = characterState.tracks[animationName]
+
+	if not animationTrack or animationTrack.Length <= 0 then
+		return nil
+	end
+
+	return animationTrack.Length
 end
 
 function AnimationHelper.Start(self: AnimationHelper): ()

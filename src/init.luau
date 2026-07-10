@@ -72,9 +72,12 @@ export type ServerAuthToolkit = typeof(ServerAuthToolkit) & {
 
 	--Animations
 	PlayAnimation: (self: ServerAuthToolkit, animationName: string, speedOverride: number?) -> (),
-	StopAnimation: (self: ServerAuthToolkit, animationName: string) -> (),
+	StopAnimation: (self: ServerAuthToolkit, animationName: string, stopFadeTimeOverride: number?) -> (),
+	StopAnimationInterrupt: (self: ServerAuthToolkit, animationName: string) -> (),
 	IsAnimationPlaying: (self: ServerAuthToolkit, animationName: string) -> boolean,
 	IsAnimationFinished: (self: ServerAuthToolkit, animationName: string) -> boolean,
+	SetProcessingRootPart: (self: ServerAuthToolkit, rootPart: BasePart?) -> (),
+	GetLoadedTrackLength: (self: ServerAuthToolkit, rootPart: BasePart, animationName: string) -> number?,
 
 	--Utility
 	WriteFlatLookDirection: (self: ServerAuthToolkit, rootPart: BasePart, flatLookDirection: Vector3) -> (),
@@ -1131,8 +1134,25 @@ end
 	@tag Animations
 	@param animationName string -- The animation to stop
 ]=]
-function ServerAuthToolkit.StopAnimation(self: ServerAuthToolkit, animationName: string): ()
-	AnimationHelper:StopAnimation(animationName)
+function ServerAuthToolkit.StopAnimation(
+	self: ServerAuthToolkit,
+	animationName: string,
+	stopFadeTimeOverride: number?
+): ()
+	AnimationHelper:StopAnimation(animationName, stopFadeTimeOverride)
+end
+
+--[=[
+	Stops a registered animation using its interrupt stop fade time.
+
+	Uses `InterruptStopFadeTime` from the registered settings when present,
+	otherwise stops immediately.
+
+	@tag Animations
+	@param animationName string -- The animation to stop
+]=]
+function ServerAuthToolkit.StopAnimationInterrupt(self: ServerAuthToolkit, animationName: string): ()
+	AnimationHelper:StopAnimationInterrupt(animationName)
 end
 
 --[=[
@@ -1157,6 +1177,32 @@ end
 ]=]
 function ServerAuthToolkit.IsAnimationFinished(self: ServerAuthToolkit, animationName: string): boolean
 	return AnimationHelper:IsAnimationFinished(animationName)
+end
+
+--[=[
+	Sets the root part used by animation query and playback methods.
+
+	@tag Animations
+	@param rootPart BasePart? -- The character root part to target
+]=]
+function ServerAuthToolkit.SetProcessingRootPart(self: ServerAuthToolkit, rootPart: BasePart?): ()
+	AnimationHelper:SetProcessingRootPart(rootPart)
+end
+
+--[=[
+	Returns the loaded track length for a registered animation on a character.
+
+	@tag Animations
+	@param rootPart BasePart -- The character root part
+	@param animationName string -- The registered animation name
+	@return number? -- Track length in seconds, if loaded
+]=]
+function ServerAuthToolkit.GetLoadedTrackLength(
+	self: ServerAuthToolkit,
+	rootPart: BasePart,
+	animationName: string
+): number?
+	return AnimationHelper:GetLoadedTrackLength(rootPart, animationName)
 end
 
 --[=[

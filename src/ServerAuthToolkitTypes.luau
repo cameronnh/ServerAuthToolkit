@@ -126,7 +126,7 @@ export type PostCameraVisualEntry = {
 }
 
 --[=[
-	@type AnimationSettings { Speed: number, Weight: number, FadeTime: number, StopFadeTime: number, Looped: boolean, Priority: Enum.AnimationPriority, Animation: Animation }
+	@type AnimationSettings { Speed: number, Weight: number, FadeTime: number, StopFadeTime: number, InterruptStopFadeTime: number?, Looped: boolean, Priority: Enum.AnimationPriority, Animation: Animation }
 	@within ServerAuthToolkit
 	@tag General
 	
@@ -137,6 +137,7 @@ export type AnimationSettings = {
 	Weight: number,
 	FadeTime: number,
 	StopFadeTime: number,
+	InterruptStopFadeTime: number?,
 	Looped: boolean,
 	Priority: Enum.AnimationPriority,
 	Animation: Animation,
