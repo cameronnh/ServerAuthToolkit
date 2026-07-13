@@ -1,199 +1,162 @@
 ----------------------------------------------------------------------------------------
--- [[ TYPES ]] --
+-- [[ DEPENDENCIES ]] --
 ----------------------------------------------------------------------------------------
 
-export type NeededStatesDefaults = { [string]: any }
+local ServerAuthToolkitTypes = require("@self/ServerAuthToolkitTypes")
 
---[=[
-	@type MovementState { Character: Model?, Humanoid: Humanoid?, RootPart: BasePart?, CameraLookVector: Vector3?, OnGround: boolean?, GroundNormal: Vector3?, GroundHeight: number?, [string]: any }
-	@within ServerAuthToolkit
-	@tag General
+----------------------------------------------------------------------------------------
+-- [[ MODULE & EXPORT ]] --
+----------------------------------------------------------------------------------------
 
-	Per-player movement state updated each simulation step. Built-in fields track
-	the character and ground info; modules add custom fields through `NeededStates`.
-]=]
-export type MovementState = {
-	Character: Model?,
-	Humanoid: Humanoid?,
-	RootPart: BasePart?,
-	CameraLookVector: Vector3?,
-	OnGround: boolean?,
-	GroundNormal: Vector3?,
-	GroundHeight: number?,
-	[string]: any,
+local MovementStateBuilder = {} :: MovementStateBuilder
+
+export type MovementStateBuilder = typeof(MovementStateBuilder) & {
+	GetMergedNeededStates: (
+		self: MovementStateBuilder,
+		definitions: { ServerAuthToolkitTypes.MovementModuleDefinition }
+	) -> ServerAuthToolkitTypes.NeededStatesDefaults,
+	GetMergedNonReplicatedStates: (
+		self: MovementStateBuilder,
+		definitions: { ServerAuthToolkitTypes.MovementModuleDefinition }
+	) -> { [string]: boolean },
+	CreateMovementState: (
+		self: MovementStateBuilder,
+		mergedNeededStates: ServerAuthToolkitTypes.NeededStatesDefaults
+	) -> ServerAuthToolkitTypes.MovementState,
+	ResetNeededStates: (
+		self: MovementStateBuilder,
+		state: ServerAuthToolkitTypes.MovementState,
+		mergedNeededStates: ServerAuthToolkitTypes.NeededStatesDefaults
+	) -> (),
+	ApplyNeededStatesFromDefinition: (
+		self: MovementStateBuilder,
+		state: ServerAuthToolkitTypes.MovementState,
+		definition: ServerAuthToolkitTypes.MovementModuleDefinition
+	) -> (),
 }
 
-export type Action = {
-	Type: Enum.InputActionType,
-	Instance: InputAction,
-	Enabled: boolean,
-	Bindings: { [string]: InputBinding },
-	Callbacks: { [string]: (state: any) -> () },
-}
+----------------------------------------------------------------------------------------
+-- [[ LOCAL METHODS ]] --
+----------------------------------------------------------------------------------------
 
---[=[
-	@type BindingProps { Backward: Enum.KeyCode?, ClampMagnitudeToOne: boolean?, Down: Enum.KeyCode?, Forward: Enum.KeyCode?, KeyCode: Enum.KeyCode?, Left: Enum.KeyCode?, PointerIndex: number?, PressedThreshold: number?, PrimaryModifier: Enum.KeyCode?, ReleasedThreshold: number?, ResponseCurve: number?, Right: Enum.KeyCode?, Scale: number?, SecondaryModifier: Enum.KeyCode?, UIButton: Enum.UserInputType?, Up: Enum.KeyCode?, Vector2Scale: Vector2?, Vector3Scale: Vector3? }
-	@within ServerAuthToolkit
-	@tag Input Action System
+local function copyDefaultValue(defaultValue: any): any
+	if typeof(defaultValue) == "Vector2" then
+		return defaultValue :: Vector2
+	end
 
-	Optional input binding settings for an action. Keys map to Roblox
-	InputBinding properties such as key codes, modifiers, and scale values.
-]=]
-export type BindingProps = {
-	Backward: Enum.KeyCode?,
-	ClampMagnitudeToOne: boolean?,
-	Down: Enum.KeyCode?,
-	Forward: Enum.KeyCode?,
-	KeyCode: Enum.KeyCode?,
-	Left: Enum.KeyCode?,
-	PointerIndex: number?,
-	PressedThreshold: number?,
-	PrimaryModifier: Enum.KeyCode?,
-	ReleasedThreshold: number?,
-	ResponseCurve: number?,
-	Right: Enum.KeyCode?,
-	Scale: number?,
-	SecondaryModifier: Enum.KeyCode?,
-	UIButton: Enum.UserInputType?,
-	Up: Enum.KeyCode?,
-	Vector2Scale: Vector2?,
-	Vector3Scale: Vector3?,
-}
+	if typeof(defaultValue) == "Vector3" then
+		return defaultValue :: Vector3
+	end
 
---[=[
-	@type ActionDefinition { Name: string, Type: Enum.InputActionType, Bindings: { [string]: BindingProps }, ApplyInput: (state: MovementState, inputState: any) -> () }
-	@within ServerAuthToolkit
-	@tag Input Action System
+	if typeof(defaultValue) == "table" then
+		return table.clone(defaultValue)
+	end
 
-	Describes one input action in a movement module. `ApplyInput` writes the
-	action state into the player's movement state each simulation step.
-]=]
-export type ActionDefinition = {
-	Name: string,
-	Type: Enum.InputActionType,
-	Bindings: { [string]: BindingProps },
-	ApplyInput: (state: MovementState, inputState: any) -> (),
-}
+	return defaultValue
+end
 
---[=[
-	@type MovementModuleDefinition { Name: string, Priority: number?, Actions: { ActionDefinition }, NeededStates: NeededStatesDefaults, NonReplicatedStates: { string }?, Process: (state: MovementState, deltaTime: number) -> (), Disable: { string }? }
-	@within ServerAuthToolkit
-	@tag General
+local function defaultsConflict(existingDefault: any, newDefault: any): boolean
+	if typeof(existingDefault) ~= typeof(newDefault) then
+		return true
+	end
 
-	Describes a movement module: input actions, default state, per-frame logic, and
-	optional Roblox actions to disable. Lower `Priority` runs first.
+	if typeof(existingDefault) == "Vector2" then
+		return (existingDefault :: Vector2) ~= (newDefault :: Vector2)
+	end
 
-	`NonReplicatedStates` lists NeededStates fields that must NOT replicate as
-	attributes: fields re-derived every step (for example written by `ApplyInput`
-	from the input actions) waste the per-instance attribute payload budget and
-	need no rollback restore. Like NeededStates, the list must be identical on
-	the server and the client.
-]=]
-export type MovementModuleDefinition = {
-	Name: string,
-	Priority: number?,
-	Actions: { ActionDefinition },
-	NeededStates: NeededStatesDefaults,
-	NonReplicatedStates: { string }?,
-	Process: (state: MovementState, deltaTime: number) -> (),
-	Disable: { string }?,
-}
+	if typeof(existingDefault) == "Vector3" then
+		return (existingDefault :: Vector3) ~= (newDefault :: Vector3)
+	end
 
---[=[
-	@type GroundDetectionConfig { MaxStepHeight: number?, LandingGap: number?, GroundLeaveVerticalSpeed: number?, MinWalkableNormalY: number? }
-	@within ServerAuthToolkit
-	@tag General
+	return existingDefault ~= newDefault
+end
 
-	Optional tuning for ground detection. Omitted fields keep their defaults.
-	Apply the same configuration on the server and the client, before or right
-	after `Start`, or grounded state diverges between prediction and authority.
-]=]
-export type GroundDetectionConfig = {
-	MaxStepHeight: number?,
-	LandingGap: number?,
-	GroundLeaveVerticalSpeed: number?,
-	MinWalkableNormalY: number?,
-}
+----------------------------------------------------------------------------------------
+-- [[ PUBLIC METHODS ]] --
+----------------------------------------------------------------------------------------
 
-export type ConnectionGroup = {
-	connections: { RBXScriptConnection },
-	cleanupTasks: { () -> () },
-}
+function MovementStateBuilder.GetMergedNeededStates(
+	self: MovementStateBuilder,
+	definitions: { ServerAuthToolkitTypes.MovementModuleDefinition }
+): ServerAuthToolkitTypes.NeededStatesDefaults
+	local mergedNeededStates: ServerAuthToolkitTypes.NeededStatesDefaults = {}
 
-export type PreCameraSimulationCallback = (deltaTime: number) -> ()
+	for _: number, definition: ServerAuthToolkitTypes.MovementModuleDefinition in definitions do
+		for stateName: string, defaultValue: any in definition.NeededStates do
+			local existingDefault: any = mergedNeededStates[stateName]
 
-export type PostCameraVisualCallback = (deltaTime: number) -> ()
+			if existingDefault ~= nil and defaultsConflict(existingDefault, defaultValue) then
+				warn(`[MovementStateBuilder] Conflicting default for "{stateName}" in module "{definition.Name}"`)
+				continue
+			end
 
---[=[
-	@type PreCameraSimulationEntry { name: string, callback: PreCameraSimulationCallback }
-	@within ServerAuthToolkit
-	@tag Callbacks
+			if existingDefault == nil then
+				mergedNeededStates[stateName] = copyDefaultValue(defaultValue)
+			end
+		end
+	end
 
-	Internal entry for a registered pre-camera simulation callback.
-]=]
-export type PreCameraSimulationEntry = {
-	name: string,
-	callback: PreCameraSimulationCallback,
-}
+	return mergedNeededStates
+end
 
---[=[
-	@type PostCameraVisualEntry { name: string, callback: PostCameraVisualCallback, priority: number }
-	@within ServerAuthToolkit
-	@tag Callbacks
+function MovementStateBuilder.GetMergedNonReplicatedStates(
+	self: MovementStateBuilder,
+	definitions: { ServerAuthToolkitTypes.MovementModuleDefinition }
+): { [string]: boolean }
+	local mergedNonReplicatedStates: { [string]: boolean } = {}
 
-	Internal entry for a registered post-camera visual callback.
-]=]
-export type PostCameraVisualEntry = {
-	name: string,
-	callback: PostCameraVisualCallback,
-	priority: number,
-}
+	for _: number, definition: ServerAuthToolkitTypes.MovementModuleDefinition in definitions do
+		local nonReplicatedStates: { string }? = definition.NonReplicatedStates
 
---[=[
-	@type AnimationSettings { Animation: Animation, Speed: number?, Weight: number?, FadeTime: number?, StopFadeTime: number?, InterruptStopFadeTime: number?, Looped: boolean?, Priority: Enum.AnimationPriority? }
-	@within ServerAuthToolkit
-	@tag General
+		if not nonReplicatedStates then
+			continue
+		end
 
-	Playback settings for a registered animation. Only `Animation` is required;
-	omitted fields default to Speed 1, Weight 1, FadeTime 0.1, StopFadeTime 0.1,
-	Looped false, and Priority Action.
-]=]
-export type AnimationSettings = {
-	Animation: Animation,
-	Speed: number?,
-	Weight: number?,
-	FadeTime: number?,
-	StopFadeTime: number?,
-	InterruptStopFadeTime: number?,
-	Looped: boolean?,
-	Priority: Enum.AnimationPriority?,
-}
+		for _: number, stateName: string in nonReplicatedStates do
+			mergedNonReplicatedStates[stateName] = true
+		end
+	end
 
-export type ResolvedAnimationSettings = {
-	Animation: Animation,
-	Speed: number,
-	Weight: number,
-	FadeTime: number,
-	StopFadeTime: number,
-	InterruptStopFadeTime: number?,
-	Looped: boolean,
-	Priority: Enum.AnimationPriority,
-}
+	return mergedNonReplicatedStates
+end
 
-export type CharacterAnimationState = {
-	rootPart: BasePart,
-	animator: Animator,
-	tracks: { [string]: AnimationTrack },
-	oneShotFinished: { [string]: boolean },
-}
+function MovementStateBuilder.CreateMovementState(
+	self: MovementStateBuilder,
+	mergedNeededStates: ServerAuthToolkitTypes.NeededStatesDefaults
+): ServerAuthToolkitTypes.MovementState
+	local movementState: ServerAuthToolkitTypes.MovementState = {
+		Character = nil :: Model?,
+		Humanoid = nil :: Humanoid?,
+		RootPart = nil :: BasePart?,
+	}
 
-export type SerializableValueType = "boolean" | "number" | "Vector2" | "Vector3" | "string"
+	for stateName: string, defaultValue: any in mergedNeededStates do
+		movementState[stateName] = copyDefaultValue(defaultValue)
+	end
 
-export type StateAttributeBinding = {
-	stateName: string,
-	attributeName: string,
-	valueType: SerializableValueType,
-	defaultValue: any,
-}
+	return movementState
+end
 
-return nil
+function MovementStateBuilder.ResetNeededStates(
+	self: MovementStateBuilder,
+	state: ServerAuthToolkitTypes.MovementState,
+	mergedNeededStates: ServerAuthToolkitTypes.NeededStatesDefaults
+): ()
+	for stateName: string, defaultValue: any in mergedNeededStates do
+		state[stateName] = copyDefaultValue(defaultValue)
+	end
+end
+
+function MovementStateBuilder.ApplyNeededStatesFromDefinition(
+	self: MovementStateBuilder,
+	state: ServerAuthToolkitTypes.MovementState,
+	definition: ServerAuthToolkitTypes.MovementModuleDefinition
+): ()
+	for stateName: string, defaultValue: any in definition.NeededStates do
+		if state[stateName] == nil then
+			state[stateName] = copyDefaultValue(defaultValue)
+		end
+	end
+end
+
+return MovementStateBuilder

@@ -874,7 +874,10 @@ function ServerAuthToolkit.RegisterDefinition(
 	table.insert(Definitions, definition)
 	sortDefinitionsByPriority()
 	MergedNeededStates = MovementStateBuilder:GetMergedNeededStates(Definitions)
-	MovementStateAttributes:Configure(MergedNeededStates, MovementStateBuilder:GetMergedNonReplicatedStates(Definitions))
+	MovementStateAttributes:Configure(
+		MergedNeededStates,
+		MovementStateBuilder:GetMergedNonReplicatedStates(Definitions)
+	)
 
 	registerDisableActionsFromDefinition(definition)
 
