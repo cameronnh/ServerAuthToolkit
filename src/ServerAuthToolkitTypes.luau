@@ -76,20 +76,43 @@ export type ActionDefinition = {
 }
 
 --[=[
-	@type MovementModuleDefinition { Name: string, Priority: number?, Actions: { ActionDefinition }, NeededStates: NeededStatesDefaults, Process: (state: MovementState, deltaTime: number) -> (), Disable: { string }? }
+	@type MovementModuleDefinition { Name: string, Priority: number?, Actions: { ActionDefinition }, NeededStates: NeededStatesDefaults, NonReplicatedStates: { string }?, Process: (state: MovementState, deltaTime: number) -> (), Disable: { string }? }
 	@within ServerAuthToolkit
 	@tag General
 
 	Describes a movement module: input actions, default state, per-frame logic, and
 	optional Roblox actions to disable. Lower `Priority` runs first.
+
+	`NonReplicatedStates` lists NeededStates fields that must NOT replicate as
+	attributes: fields re-derived every step (for example written by `ApplyInput`
+	from the input actions) waste the per-instance attribute payload budget and
+	need no rollback restore. Like NeededStates, the list must be identical on
+	the server and the client.
 ]=]
 export type MovementModuleDefinition = {
 	Name: string,
 	Priority: number?,
 	Actions: { ActionDefinition },
 	NeededStates: NeededStatesDefaults,
+	NonReplicatedStates: { string }?,
 	Process: (state: MovementState, deltaTime: number) -> (),
 	Disable: { string }?,
+}
+
+--[=[
+	@type GroundDetectionConfig { MaxStepHeight: number?, LandingGap: number?, GroundLeaveVerticalSpeed: number?, MinWalkableNormalY: number? }
+	@within ServerAuthToolkit
+	@tag General
+
+	Optional tuning for ground detection. Omitted fields keep their defaults.
+	Apply the same configuration on the server and the client, before or right
+	after `Start`, or grounded state diverges between prediction and authority.
+]=]
+export type GroundDetectionConfig = {
+	MaxStepHeight: number?,
+	LandingGap: number?,
+	GroundLeaveVerticalSpeed: number?,
+	MinWalkableNormalY: number?,
 }
 
 export type ConnectionGroup = {
@@ -127,13 +150,27 @@ export type PostCameraVisualEntry = {
 }
 
 --[=[
-	@type AnimationSettings { Speed: number, Weight: number, FadeTime: number, StopFadeTime: number, InterruptStopFadeTime: number?, Looped: boolean, Priority: Enum.AnimationPriority, Animation: Animation }
+	@type AnimationSettings { Animation: Animation, Speed: number?, Weight: number?, FadeTime: number?, StopFadeTime: number?, InterruptStopFadeTime: number?, Looped: boolean?, Priority: Enum.AnimationPriority? }
 	@within ServerAuthToolkit
 	@tag General
-	
-	Playback settings for a registered animation.
+
+	Playback settings for a registered animation. Only `Animation` is required;
+	omitted fields default to Speed 1, Weight 1, FadeTime 0.1, StopFadeTime 0.1,
+	Looped false, and Priority Action.
 ]=]
 export type AnimationSettings = {
+	Animation: Animation,
+	Speed: number?,
+	Weight: number?,
+	FadeTime: number?,
+	StopFadeTime: number?,
+	InterruptStopFadeTime: number?,
+	Looped: boolean?,
+	Priority: Enum.AnimationPriority?,
+}
+
+export type ResolvedAnimationSettings = {
+	Animation: Animation,
 	Speed: number,
 	Weight: number,
 	FadeTime: number,
@@ -141,7 +178,6 @@ export type AnimationSettings = {
 	InterruptStopFadeTime: number?,
 	Looped: boolean,
 	Priority: Enum.AnimationPriority,
-	Animation: Animation,
 }
 
 export type CharacterAnimationState = {
@@ -151,7 +187,7 @@ export type CharacterAnimationState = {
 	oneShotFinished: { [string]: boolean },
 }
 
-export type SerializableValueType = "boolean" | "number" | "Vector3" | "string"
+export type SerializableValueType = "boolean" | "number" | "Vector2" | "Vector3" | "string"
 
 export type StateAttributeBinding = {
 	stateName: string,

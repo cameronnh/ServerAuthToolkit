@@ -86,7 +86,11 @@ export type ServerAuthToolkit = typeof(ServerAuthToolkit) & {
 	ReadFlatLookDirection: (self: ServerAuthToolkit, rootPart: BasePart) -> Vector3,
 	QuantizeFlatDirection: (self: ServerAuthToolkit, flatDirection: Vector3) -> Vector3,
 	GetRootStandHeight: (self: ServerAuthToolkit, state: ServerAuthToolkitTypes.MovementState) -> number?,
+	GetVerticalSpeedExcess: (self: ServerAuthToolkit, velocity: Vector3, groundNormal: Vector3) -> number,
+	ConfigureGroundDetection: (self: ServerAuthToolkit, config: ServerAuthToolkitTypes.GroundDetectionConfig) -> (),
 	GetMaxStepHeight: (self: ServerAuthToolkit) -> number,
+	GetGroundLeaveVerticalSpeed: (self: ServerAuthToolkit) -> number,
+	GetMinWalkableNormalY: (self: ServerAuthToolkit) -> number,
 	Teleport: (
 		self: ServerAuthToolkit,
 		player: Player,
@@ -870,7 +874,7 @@ function ServerAuthToolkit.RegisterDefinition(
 	table.insert(Definitions, definition)
 	sortDefinitionsByPriority()
 	MergedNeededStates = MovementStateBuilder:GetMergedNeededStates(Definitions)
-	MovementStateAttributes:Configure(MergedNeededStates)
+	MovementStateAttributes:Configure(MergedNeededStates, MovementStateBuilder:GetMergedNonReplicatedStates(Definitions))
 
 	registerDisableActionsFromDefinition(definition)
 
@@ -1311,6 +1315,45 @@ function ServerAuthToolkit.GetRootStandHeight(
 end
 
 --[=[
+	Returns vertical speed beyond what following the given ground plane accounts
+	for. Riding a ramp keeps this near zero, while jump or knockback velocity
+	pushes it past `GetGroundLeaveVerticalSpeed`.
+
+	This is the same math ground detection uses for its leave gate, so custom
+	modules (launches, snaps, landing checks) stay consistent with it.
+
+	@tag Utility
+	@param velocity Vector3 -- The velocity to measure
+	@param groundNormal Vector3 -- The ground plane normal the character moves along
+	@return number -- Vertical speed in excess of plane-following movement
+]=]
+function ServerAuthToolkit.GetVerticalSpeedExcess(
+	self: ServerAuthToolkit,
+	velocity: Vector3,
+	groundNormal: Vector3
+): number
+	return IsOnGround:GetVerticalSpeedExcess(velocity, groundNormal)
+end
+
+--[=[
+	Overrides ground detection tuning (step height, landing gap, leave speed,
+	walkable slope limit). Omitted fields keep their defaults.
+
+	Call identically on the server and the client, before or right after
+	`Start`; the values feed the predicted simulation, so a mismatch makes the
+	client diverge from the server.
+
+	@tag Register
+	@param config ServerAuthToolkitTypes.GroundDetectionConfig -- Fields to override
+]=]
+function ServerAuthToolkit.ConfigureGroundDetection(
+	self: ServerAuthToolkit,
+	config: ServerAuthToolkitTypes.GroundDetectionConfig
+): ()
+	IsOnGround:Configure(config)
+end
+
+--[=[
 	Returns the maximum ledge height ground detection treats as a walkable step.
 
 	Grounded characters stay grounded across ledges up to this height, so
@@ -1322,6 +1365,29 @@ end
 ]=]
 function ServerAuthToolkit.GetMaxStepHeight(self: ServerAuthToolkit): number
 	return IsOnGround:GetMaxStepHeight()
+end
+
+--[=[
+	Returns the vertical speed excess above which the character leaves the
+	ground (see `GetVerticalSpeedExcess`).
+
+	@tag Utility
+	@return number -- Ground leave threshold in studs per second
+]=]
+function ServerAuthToolkit.GetGroundLeaveVerticalSpeed(self: ServerAuthToolkit): number
+	return IsOnGround:GetGroundLeaveVerticalSpeed()
+end
+
+--[=[
+	Returns the minimum surface normal Y ground detection treats as walkable.
+	Surfaces below it are walls; modules that clip velocity against walls should
+	use the same boundary.
+
+	@tag Utility
+	@return number -- Minimum walkable normal Y
+]=]
+function ServerAuthToolkit.GetMinWalkableNormalY(self: ServerAuthToolkit): number
+	return IsOnGround:GetMinWalkableNormalY()
 end
 
 --[=[

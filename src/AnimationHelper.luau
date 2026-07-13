@@ -43,14 +43,20 @@ local self: AnimationHelper = AnimationHelper
 -- [[ CONSTANTS ]] --
 ----------------------------------------------------------------------------------------
 
-const ANIMATION_ATTRIBUTE_PREFIX: string = "ServerAuthToolkitAnim_"
+const ANIMATION_ATTRIBUTE_PREFIX: string = "SATAnim_"
 const ONE_SHOT_FINISH_PLAYTHROUGH: number = 0.98
+
+const DEFAULT_ANIMATION_SPEED: number = 1
+const DEFAULT_ANIMATION_WEIGHT: number = 1
+const DEFAULT_ANIMATION_FADE_TIME: number = 0.1
+const DEFAULT_ANIMATION_STOP_FADE_TIME: number = 0.1
+const DEFAULT_ANIMATION_PRIORITY: Enum.AnimationPriority = Enum.AnimationPriority.Action
 
 ----------------------------------------------------------------------------------------
 -- [[ FIELDS ]] --
 ----------------------------------------------------------------------------------------
 
-local Animations: { [string]: ServerAuthToolkitTypes.AnimationSettings } = {}
+local Animations: { [string]: ServerAuthToolkitTypes.ResolvedAnimationSettings } = {}
 local CharacterStates: { [BasePart]: ServerAuthToolkitTypes.CharacterAnimationState } = {}
 local LocalDesiredAnimations: { [BasePart]: { [string]: boolean } } = {}
 local AlreadyPlayingAnimations: { [string]: boolean } = {}
@@ -103,7 +109,7 @@ end
 local function initializeLocalDesiredAnimations(rootPart: BasePart): ()
 	local desiredState: { [string]: boolean } = {}
 
-	for animationName: string, _: ServerAuthToolkitTypes.AnimationSettings in Animations do
+	for animationName: string, _: ServerAuthToolkitTypes.ResolvedAnimationSettings in Animations do
 		if isAlreadyPlaying(animationName) then
 			desiredState[animationName] = true
 		end
@@ -319,7 +325,7 @@ end
 local function loadAnimationTrack(
 	characterState: ServerAuthToolkitTypes.CharacterAnimationState,
 	animationName: string,
-	animationSettings: ServerAuthToolkitTypes.AnimationSettings
+	animationSettings: ServerAuthToolkitTypes.ResolvedAnimationSettings
 ): AnimationTrack
 	local animationTrack: AnimationTrack = characterState.animator:LoadAnimation(animationSettings.Animation)
 
@@ -341,7 +347,7 @@ end
 local function playAnimationTrack(
 	characterState: ServerAuthToolkitTypes.CharacterAnimationState,
 	animationName: string,
-	animationSettings: ServerAuthToolkitTypes.AnimationSettings
+	animationSettings: ServerAuthToolkitTypes.ResolvedAnimationSettings
 ): ()
 	local animationTrack: AnimationTrack? = characterState.tracks[animationName]
 
@@ -448,7 +454,7 @@ end
 local function stopAnimationTrack(
 	characterState: ServerAuthToolkitTypes.CharacterAnimationState,
 	animationName: string,
-	animationSettings: ServerAuthToolkitTypes.AnimationSettings
+	animationSettings: ServerAuthToolkitTypes.ResolvedAnimationSettings
 ): ()
 	local animationTrack: AnimationTrack? = characterState.tracks[animationName]
 
@@ -470,7 +476,7 @@ local function syncCharacterAnimationState(characterState: ServerAuthToolkitType
 	local rootPart: BasePart = characterState.rootPart
 	local isAttributeObserver: boolean = IsClient and not usesLocalAnimationAuthority(rootPart)
 
-	for animationName: string, animationSettings: ServerAuthToolkitTypes.AnimationSettings in Animations do
+	for animationName: string, animationSettings: ServerAuthToolkitTypes.ResolvedAnimationSettings in Animations do
 		local shouldPlay: boolean? = getDesiredAnimationShouldPlay(rootPart, animationName)
 		local animationTrack: AnimationTrack? = characterState.tracks[animationName]
 		local isOneShot: boolean = animationSettings.Looped ~= true
@@ -555,7 +561,7 @@ local function setPlayingAnimationState(rootPart: BasePart?, animationName: stri
 		return
 	end
 
-	local animationSettings: ServerAuthToolkitTypes.AnimationSettings? = Animations[animationName]
+	local animationSettings: ServerAuthToolkitTypes.ResolvedAnimationSettings? = Animations[animationName]
 
 	if shouldPlay == true then
 		consumePendingStopFadeOverride(rootPart, animationName)
@@ -573,7 +579,7 @@ local function setPlayingAnimationState(rootPart: BasePart?, animationName: stri
 end
 
 local function applyAlreadyPlayingAnimations(characterState: ServerAuthToolkitTypes.CharacterAnimationState): ()
-	for animationName: string, _: ServerAuthToolkitTypes.AnimationSettings in Animations do
+	for animationName: string, _: ServerAuthToolkitTypes.ResolvedAnimationSettings in Animations do
 		if isAlreadyPlaying(animationName) then
 			setDesiredAnimationShouldPlay(characterState.rootPart, animationName, true)
 		end
@@ -589,10 +595,21 @@ function AnimationHelper.RegisterAnimation(
 	animationName: string,
 	animationSettings: ServerAuthToolkitTypes.AnimationSettings
 ): ()
-	Animations[animationName] = animationSettings
+	local resolvedSettings: ServerAuthToolkitTypes.ResolvedAnimationSettings = {
+		Animation = animationSettings.Animation,
+		Speed = animationSettings.Speed or DEFAULT_ANIMATION_SPEED,
+		Weight = animationSettings.Weight or DEFAULT_ANIMATION_WEIGHT,
+		FadeTime = animationSettings.FadeTime or DEFAULT_ANIMATION_FADE_TIME,
+		StopFadeTime = animationSettings.StopFadeTime or DEFAULT_ANIMATION_STOP_FADE_TIME,
+		InterruptStopFadeTime = animationSettings.InterruptStopFadeTime,
+		Looped = animationSettings.Looped == true,
+		Priority = animationSettings.Priority or DEFAULT_ANIMATION_PRIORITY,
+	}
+
+	Animations[animationName] = resolvedSettings
 
 	for _: BasePart, characterState: ServerAuthToolkitTypes.CharacterAnimationState in CharacterStates do
-		loadAnimationTrack(characterState, animationName, animationSettings)
+		loadAnimationTrack(characterState, animationName, resolvedSettings)
 
 		if isAlreadyPlaying(animationName) then
 			setDesiredAnimationShouldPlay(characterState.rootPart, animationName, true)
@@ -629,7 +646,7 @@ function AnimationHelper.PlayAnimation(self: AnimationHelper, animationName: str
 end
 
 function AnimationHelper.RestartAnimation(self: AnimationHelper, animationName: string, speedOverride: number?): ()
-	local animationSettings: ServerAuthToolkitTypes.AnimationSettings? = Animations[animationName]
+	local animationSettings: ServerAuthToolkitTypes.ResolvedAnimationSettings? = Animations[animationName]
 
 	if not animationSettings then
 		warn(`[AnimationHelper] Attempted to restart unregistered animation "{animationName}"`)
@@ -672,7 +689,7 @@ function AnimationHelper.StopAnimation(self: AnimationHelper, animationName: str
 end
 
 function AnimationHelper.StopAnimationInterrupt(self: AnimationHelper, animationName: string): ()
-	local animationSettings: ServerAuthToolkitTypes.AnimationSettings? = Animations[animationName]
+	local animationSettings: ServerAuthToolkitTypes.ResolvedAnimationSettings? = Animations[animationName]
 
 	if not animationSettings then
 		warn(`[AnimationHelper] Attempted to interrupt unregistered animation "{animationName}"`)
@@ -699,7 +716,7 @@ function AnimationHelper.IsAnimationPlaying(self: AnimationHelper, animationName
 end
 
 function AnimationHelper.IsAnimationFinished(self: AnimationHelper, animationName: string): boolean
-	local animationSettings: ServerAuthToolkitTypes.AnimationSettings? = Animations[animationName]
+	local animationSettings: ServerAuthToolkitTypes.ResolvedAnimationSettings? = Animations[animationName]
 
 	if not animationSettings or animationSettings.Looped then
 		return false
@@ -775,7 +792,7 @@ function AnimationHelper.HumanoidAdded(self: AnimationHelper, humanoid: Humanoid
 		initializeLocalDesiredAnimations(rootPart)
 	end
 
-	for animationName: string, animationSettings: ServerAuthToolkitTypes.AnimationSettings in Animations do
+	for animationName: string, animationSettings: ServerAuthToolkitTypes.ResolvedAnimationSettings in Animations do
 		loadAnimationTrack(characterState, animationName, animationSettings)
 	end
 

@@ -8,19 +8,16 @@ local ServerAuthToolkitTypes = require(script.Parent.ServerAuthToolkitTypes)
 -- [[ CONSTANTS ]] --
 ----------------------------------------------------------------------------------------
 
-const ATTRIBUTE_PREFIX: string = "ServerAuthToolkit_"
+const ATTRIBUTE_PREFIX: string = "SAT_"
 
 const FLAT_LOOK_DIRECTION_ATTRIBUTE_NAME: string = `{ATTRIBUTE_PREFIX}FlatLookDirection`
 
 const DEFAULT_FLAT_LOOK_DIRECTION: Vector3 = Vector3.new(0, 0, -1)
 const YAW_QUANTIZATION_STEP: number = math.rad(0.25)
 
--- Ground state (OnGround/GroundNormal/GroundHeight) is deliberately not
--- replicated. It is recomputed at the top of every simulation step before any
--- module reads it, so it costs nothing to leave out, and the per-instance
--- attribute payload is limited to 1024 bytes -- a Vector3 ground normal alone
--- is enough to overflow it. Ground detection instead keeps its cross-step
--- decisions rollback-safe by deriving them from the replicated Velocity.
+-- OnGround and GroundHeight are recomputed at the top of every simulation step
+-- before anything reads them (grounded hysteresis derives from the replicated
+-- Velocity), so replicating them would only spend payload.
 const EXCLUDED_STATE_NAMES: { [string]: boolean } = {
 	Character = true,
 	Humanoid = true,
@@ -31,11 +28,27 @@ const EXCLUDED_STATE_NAMES: { [string]: boolean } = {
 	GroundHeight = true,
 }
 
+-- GroundNormal is the one cross-step input to ground detection: the leave gate
+-- measures velocity against the plane the character moved along LAST step. It
+-- must be captured and restored around rollbacks or the first resimulated step
+-- uses the abandoned timeline's plane and the grounded verdict diverges from
+-- the server -- most visibly during slides and jumps across ramps and crests.
+-- It stays in EXCLUDED_STATE_NAMES so module NeededStates cannot double-bind it.
+const CORE_STATE_BINDINGS: { ServerAuthToolkitTypes.StateAttributeBinding } = {
+	{
+		stateName = "GroundNormal",
+		attributeName = `{ATTRIBUTE_PREFIX}GroundNormal`,
+		valueType = "Vector3",
+		defaultValue = Vector3.yAxis,
+	},
+}
+
 ----------------------------------------------------------------------------------------
 -- [[ FIELDS ]] --
 ----------------------------------------------------------------------------------------
 
 local stateAttributeBindings: { ServerAuthToolkitTypes.StateAttributeBinding } = {}
+local warnedUnserializableStateNames: { [string]: boolean } = {}
 
 ----------------------------------------------------------------------------------------
 -- [[ LOCAL METHODS ]] --
@@ -44,7 +57,13 @@ local stateAttributeBindings: { ServerAuthToolkitTypes.StateAttributeBinding } =
 local function getSerializableValueType(defaultValue: any): ServerAuthToolkitTypes.SerializableValueType?
 	local valueType: string = typeof(defaultValue)
 
-	if valueType == "boolean" or valueType == "number" or valueType == "Vector3" or valueType == "string" then
+	if
+		valueType == "boolean"
+		or valueType == "number"
+		or valueType == "Vector2"
+		or valueType == "Vector3"
+		or valueType == "string"
+	then
 		return valueType :: ServerAuthToolkitTypes.SerializableValueType
 	end
 
@@ -52,18 +71,28 @@ local function getSerializableValueType(defaultValue: any): ServerAuthToolkitTyp
 end
 
 local function buildStateAttributeBindings(
-	mergedNeededStates: ServerAuthToolkitTypes.NeededStatesDefaults
+	mergedNeededStates: ServerAuthToolkitTypes.NeededStatesDefaults,
+	nonReplicatedStateNames: { [string]: boolean }
 ): { ServerAuthToolkitTypes.StateAttributeBinding }
 	local bindings: { ServerAuthToolkitTypes.StateAttributeBinding } = {}
 
 	for stateName: string, defaultValue: any in mergedNeededStates do
-		if EXCLUDED_STATE_NAMES[stateName] then
+		if EXCLUDED_STATE_NAMES[stateName] or nonReplicatedStateNames[stateName] then
 			continue
 		end
 
 		local valueType: ServerAuthToolkitTypes.SerializableValueType? = getSerializableValueType(defaultValue)
 
 		if not valueType then
+			if not warnedUnserializableStateNames[stateName] then
+				warnedUnserializableStateNames[stateName] = true
+				warn(
+					`[ServerAuthToolkit] NeededStates field "{stateName}" ({typeof(defaultValue)}) is not`
+						.. ` attribute-serializable and will not replicate or restore on rollback;`
+						.. ` use a serializable type or list it in the module's NonReplicatedStates`
+				)
+			end
+
 			continue
 		end
 
@@ -76,6 +105,16 @@ local function buildStateAttributeBindings(
 	end
 
 	return bindings
+end
+
+local function readVector2(rootPart: BasePart, attributeName: string, fallback: Vector2): Vector2
+	local storedValue: unknown = rootPart:GetAttribute(attributeName)
+
+	if typeof(storedValue) == "Vector2" then
+		return storedValue :: Vector2
+	end
+
+	return fallback
 end
 
 local function readBool(rootPart: BasePart, attributeName: string, fallback: boolean): boolean
@@ -136,6 +175,14 @@ local function getReadFallback(
 		return binding.defaultValue
 	end
 
+	if binding.valueType == "Vector2" then
+		if typeof(currentValue) == "Vector2" then
+			return currentValue
+		end
+
+		return binding.defaultValue
+	end
+
 	if binding.valueType == "Vector3" then
 		if typeof(currentValue) == "Vector3" then
 			return currentValue
@@ -162,6 +209,8 @@ local function applyBindingToState(
 		state[binding.stateName] = readBool(rootPart, binding.attributeName, fallback)
 	elseif binding.valueType == "number" then
 		state[binding.stateName] = readNumber(rootPart, binding.attributeName, fallback)
+	elseif binding.valueType == "Vector2" then
+		state[binding.stateName] = readVector2(rootPart, binding.attributeName, fallback)
 	elseif binding.valueType == "Vector3" then
 		state[binding.stateName] = readVector3(rootPart, binding.attributeName, fallback)
 	else
@@ -181,6 +230,12 @@ local function captureBindingFromState(
 		rootPart:SetAttribute(
 			binding.attributeName,
 			if typeof(currentValue) == "number" then currentValue else binding.defaultValue
+		)
+	elseif binding.valueType == "Vector2" then
+		local currentValue: any = state[binding.stateName]
+		rootPart:SetAttribute(
+			binding.attributeName,
+			if typeof(currentValue) == "Vector2" then currentValue else binding.defaultValue
 		)
 	elseif binding.valueType == "Vector3" then
 		local currentValue: any = state[binding.stateName]
@@ -215,7 +270,11 @@ end
 local MovementStateAttributes = {} :: MovementStateAttributes
 
 export type MovementStateAttributes = typeof(MovementStateAttributes) & {
-	Configure: (self: MovementStateAttributes, mergedNeededStates: ServerAuthToolkitTypes.NeededStatesDefaults) -> (),
+	Configure: (
+		self: MovementStateAttributes,
+		mergedNeededStates: ServerAuthToolkitTypes.NeededStatesDefaults,
+		nonReplicatedStateNames: { [string]: boolean }
+	) -> (),
 	ApplyToMovementState: (
 		self: MovementStateAttributes,
 		rootPart: BasePart,
@@ -241,9 +300,17 @@ local self: MovementStateAttributes = MovementStateAttributes
 
 function MovementStateAttributes.Configure(
 	self: MovementStateAttributes,
-	mergedNeededStates: ServerAuthToolkitTypes.NeededStatesDefaults
+	mergedNeededStates: ServerAuthToolkitTypes.NeededStatesDefaults,
+	nonReplicatedStateNames: { [string]: boolean }
 ): ()
-	stateAttributeBindings = buildStateAttributeBindings(mergedNeededStates)
+	local bindings: { ServerAuthToolkitTypes.StateAttributeBinding } =
+		buildStateAttributeBindings(mergedNeededStates, nonReplicatedStateNames)
+
+	for _: number, coreBinding: ServerAuthToolkitTypes.StateAttributeBinding in CORE_STATE_BINDINGS do
+		table.insert(bindings, coreBinding)
+	end
+
+	stateAttributeBindings = bindings
 end
 
 function MovementStateAttributes.QuantizeFlatDirection(self: MovementStateAttributes, flatDirection: Vector3): Vector3

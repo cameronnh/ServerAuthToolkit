@@ -14,7 +14,10 @@ export type IsOnGround = typeof(IsOnGround) & {
 	Get: (self: IsOnGround, state: ServerAuthToolkitTypes.MovementState) -> (boolean, Vector3, number?),
 	GetRootStandHeight: (self: IsOnGround, state: ServerAuthToolkitTypes.MovementState) -> number?,
 	GetVerticalSpeedExcess: (self: IsOnGround, velocity: Vector3, groundNormal: Vector3) -> number,
+	Configure: (self: IsOnGround, config: ServerAuthToolkitTypes.GroundDetectionConfig) -> (),
 	GetMaxStepHeight: (self: IsOnGround) -> number,
+	GetGroundLeaveVerticalSpeed: (self: IsOnGround) -> number,
+	GetMinWalkableNormalY: (self: IsOnGround) -> number,
 }
 
 local self: IsOnGround = IsOnGround
@@ -25,14 +28,15 @@ local self: IsOnGround = IsOnGround
 
 const GROUND_RAY_DISTANCE: number = 12
 const GROUND_RAYCAST_ORIGIN_SNAP: number = 0.25
-const MIN_WALKABLE_NORMAL_Y: number = 0.35
-const GROUND_LEAVE_VERTICAL_SPEED: number = 2
 const EPSILON: number = 0.001
 
 const GROUND_RAY_HORIZONTAL_OFFSET: number = 0.7
-const MAX_STEP_HEIGHT: number = 2.25
-const LANDING_GAP: number = 0.35
 const FALLBACK_GROUND_RAY_MAX_GAP: number = 3.25
+
+const DEFAULT_MIN_WALKABLE_NORMAL_Y: number = 0.35
+const DEFAULT_GROUND_LEAVE_VERTICAL_SPEED: number = 2
+const DEFAULT_MAX_STEP_HEIGHT: number = 2.25
+const DEFAULT_LANDING_GAP: number = 0.35
 
 const DEFAULT_GROUND_NORMAL: Vector3 = Vector3.yAxis
 const DEFAULT_R6_LEG_HEIGHT: number = 2
@@ -47,6 +51,13 @@ const SEAM_PROBE_OFFSETS: { Vector3 } = {
 ----------------------------------------------------------------------------------------
 -- [[ FIELDS ]] --
 ----------------------------------------------------------------------------------------
+
+-- Tunables (see GroundDetectionConfig); must hold the same values on the
+-- server and the client for prediction to match authority.
+local MinWalkableNormalY: number = DEFAULT_MIN_WALKABLE_NORMAL_Y
+local GroundLeaveVerticalSpeed: number = DEFAULT_GROUND_LEAVE_VERTICAL_SPEED
+local MaxStepHeight: number = DEFAULT_MAX_STEP_HEIGHT
+local LandingGap: number = DEFAULT_LANDING_GAP
 
 local GroundRaycastParams: RaycastParams = RaycastParams.new()
 GroundRaycastParams.FilterType = Enum.RaycastFilterType.Exclude
@@ -68,7 +79,7 @@ local function getDeterministicRaycastOrigin(rootPart: BasePart): Vector3
 end
 
 local function isWalkableHit(groundHit: RaycastResult?): boolean
-	return groundHit ~= nil and groundHit.Instance ~= nil and groundHit.Normal.Y >= MIN_WALKABLE_NORMAL_Y
+	return groundHit ~= nil and groundHit.Instance ~= nil and groundHit.Normal.Y >= MinWalkableNormalY
 end
 
 local function castGroundRay(rayOrigin: Vector3): RaycastResult?
@@ -148,7 +159,7 @@ local function isOnGround(state: ServerAuthToolkitTypes.MovementState): (boolean
 		then state.GroundNormal :: Vector3
 		else groundNormal
 
-	if getVerticalSpeedExcess(velocity, previousGroundNormal) > GROUND_LEAVE_VERTICAL_SPEED then
+	if getVerticalSpeedExcess(velocity, previousGroundNormal) > GroundLeaveVerticalSpeed then
 		return false, DEFAULT_GROUND_NORMAL, nil
 	end
 
@@ -157,8 +168,8 @@ local function isOnGround(state: ServerAuthToolkitTypes.MovementState): (boolean
 
 	if rootStandHeight then
 		local verticalSpeedExcess: number = getVerticalSpeedExcess(velocity, groundNormal)
-		local isFollowingGround: boolean = verticalSpeedExcess > -GROUND_LEAVE_VERTICAL_SPEED
-		local gapAllowance: number = if isFollowingGround then MAX_STEP_HEIGHT else LANDING_GAP
+		local isFollowingGround: boolean = verticalSpeedExcess > -GroundLeaveVerticalSpeed
+		local gapAllowance: number = if isFollowingGround then MaxStepHeight else LandingGap
 		local slopeTangent: number = math.sqrt(math.max(0, 1 - groundNormal.Y * groundNormal.Y)) / groundNormal.Y
 
 		allowedGap = rootStandHeight
@@ -192,8 +203,23 @@ function IsOnGround.GetVerticalSpeedExcess(self: IsOnGround, velocity: Vector3, 
 	return getVerticalSpeedExcess(velocity, groundNormal)
 end
 
+function IsOnGround.Configure(self: IsOnGround, config: ServerAuthToolkitTypes.GroundDetectionConfig): ()
+	MinWalkableNormalY = config.MinWalkableNormalY or MinWalkableNormalY
+	GroundLeaveVerticalSpeed = config.GroundLeaveVerticalSpeed or GroundLeaveVerticalSpeed
+	MaxStepHeight = config.MaxStepHeight or MaxStepHeight
+	LandingGap = config.LandingGap or LandingGap
+end
+
 function IsOnGround.GetMaxStepHeight(self: IsOnGround): number
-	return MAX_STEP_HEIGHT
+	return MaxStepHeight
+end
+
+function IsOnGround.GetGroundLeaveVerticalSpeed(self: IsOnGround): number
+	return GroundLeaveVerticalSpeed
+end
+
+function IsOnGround.GetMinWalkableNormalY(self: IsOnGround): number
+	return MinWalkableNormalY
 end
 
 return self
