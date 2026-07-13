@@ -72,10 +72,12 @@ export type ServerAuthToolkit = typeof(ServerAuthToolkit) & {
 
 	--Animations
 	PlayAnimation: (self: ServerAuthToolkit, animationName: string, speedOverride: number?) -> (),
+	RestartAnimation: (self: ServerAuthToolkit, animationName: string, speedOverride: number?) -> (),
 	StopAnimation: (self: ServerAuthToolkit, animationName: string, stopFadeTimeOverride: number?) -> (),
 	StopAnimationInterrupt: (self: ServerAuthToolkit, animationName: string) -> (),
 	IsAnimationPlaying: (self: ServerAuthToolkit, animationName: string) -> boolean,
 	IsAnimationFinished: (self: ServerAuthToolkit, animationName: string) -> boolean,
+	IsCharacterTracked: (self: ServerAuthToolkit, rootPart: BasePart) -> boolean,
 	SetProcessingRootPart: (self: ServerAuthToolkit, rootPart: BasePart?) -> (),
 	GetLoadedTrackLength: (self: ServerAuthToolkit, rootPart: BasePart, animationName: string) -> number?,
 
@@ -1130,6 +1132,26 @@ function ServerAuthToolkit.PlayAnimation(self: ServerAuthToolkit, animationName:
 end
 
 --[=[
+	Restarts a registered one-shot animation from the beginning, even while it
+	is still playing.
+
+	Use for retriggered actions like gunshots, where each event needs a fresh
+	playthrough. `PlayAnimation` deliberately keeps an in-flight one-shot going
+	so that replayed simulation steps cannot restart it; RestartAnimation is the
+	explicit trigger for a new playthrough, so only call it from event-driven
+	code (input handlers, remotes), never from simulation logic that reruns
+	during rollback resimulation. Looped animations fall back to `PlayAnimation`
+	behavior.
+
+	@tag Animations
+	@param animationName string -- The animation to restart
+	@param speedOverride number? -- Optional playback speed. Uses registered speed if omitted
+]=]
+function ServerAuthToolkit.RestartAnimation(self: ServerAuthToolkit, animationName: string, speedOverride: number?): ()
+	AnimationHelper:RestartAnimation(animationName, speedOverride)
+end
+
+--[=[
 	Stops a registered animation.
 
 	Uses the registered stop fade time when blending out.
@@ -1180,6 +1202,22 @@ end
 ]=]
 function ServerAuthToolkit.IsAnimationFinished(self: ServerAuthToolkit, animationName: string): boolean
 	return AnimationHelper:IsAnimationFinished(animationName)
+end
+
+--[=[
+	Returns whether the animation system is tracking a character's root part.
+
+	Use before `SetProcessingRootPart` from event-driven code: a root part the
+	system does not know yet (for example during the spawn frame) would
+	otherwise leave no processing character set, and play calls would fall back
+	to the global pre-character path.
+
+	@tag Animations
+	@param rootPart BasePart -- The character root part to check
+	@return boolean -- True if animations can target this character
+]=]
+function ServerAuthToolkit.IsCharacterTracked(self: ServerAuthToolkit, rootPart: BasePart): boolean
+	return AnimationHelper:IsCharacterTracked(rootPart)
 end
 
 --[=[
