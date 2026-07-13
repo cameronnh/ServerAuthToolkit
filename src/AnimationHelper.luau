@@ -53,9 +53,12 @@ local CharacterStates: { [BasePart]: ServerAuthToolkitTypes.CharacterAnimationSt
 local LocalDesiredAnimations: { [BasePart]: { [string]: boolean } } = {}
 local AlreadyPlayingAnimations: { [string]: boolean } = {}
 local ProcessingCharacterState: ServerAuthToolkitTypes.CharacterAnimationState? = nil
-local SimulationBound: boolean = false
-local PendingSpeedOverrides: { [string]: number } = {}
+local ReconcileBound: boolean = false
+local PendingSpeedOverrides: { [BasePart]: { [string]: number } } = {}
+local GlobalPendingSpeedOverrides: { [string]: number } = {}
 local PendingStopFadeOverrides: { [BasePart]: { [string]: number } } = {}
+local OneShotRestartRequests: { [BasePart]: { [string]: boolean } } = {}
+local LastObservedDesired: { [BasePart]: { [string]: boolean } } = {}
 local LoopedAnimationTimePositions: { [BasePart]: { [string]: number } } = {}
 local LoopedTrackWasPlaying: { [BasePart]: { [string]: boolean } } = {}
 local IsClient: boolean = RunService:IsClient()
@@ -218,6 +221,73 @@ local function clearLoopedTrackResumeState(rootPart: BasePart, animationName: st
 	setLoopedTrackWasPlaying(rootPart, animationName, false)
 end
 
+local function setPendingSpeedOverride(rootPart: BasePart, animationName: string, speed: number): ()
+	local overridesByAnimation: { [string]: number } = PendingSpeedOverrides[rootPart]
+
+	if not overridesByAnimation then
+		overridesByAnimation = {}
+		PendingSpeedOverrides[rootPart] = overridesByAnimation
+	end
+
+	overridesByAnimation[animationName] = speed
+end
+
+local function consumePendingSpeedOverride(rootPart: BasePart, animationName: string): number?
+	local overridesByAnimation: { [string]: number }? = PendingSpeedOverrides[rootPart]
+
+	if not overridesByAnimation then
+		return nil
+	end
+
+	local speed: number? = overridesByAnimation[animationName]
+
+	overridesByAnimation[animationName] = nil
+
+	return speed
+end
+
+local function setOneShotRestartRequested(rootPart: BasePart, animationName: string): ()
+	local requestsByAnimation: { [string]: boolean } = OneShotRestartRequests[rootPart]
+
+	if not requestsByAnimation then
+		requestsByAnimation = {}
+		OneShotRestartRequests[rootPart] = requestsByAnimation
+	end
+
+	requestsByAnimation[animationName] = true
+end
+
+local function consumeOneShotRestartRequested(rootPart: BasePart, animationName: string): boolean
+	local requestsByAnimation: { [string]: boolean }? = OneShotRestartRequests[rootPart]
+
+	if not requestsByAnimation then
+		return false
+	end
+
+	local wasRequested: boolean = requestsByAnimation[animationName] == true
+
+	requestsByAnimation[animationName] = nil
+
+	return wasRequested
+end
+
+local function getLastObservedDesired(rootPart: BasePart, animationName: string): boolean
+	local desiredByAnimation: { [string]: boolean }? = LastObservedDesired[rootPart]
+
+	return desiredByAnimation ~= nil and desiredByAnimation[animationName] == true
+end
+
+local function setLastObservedDesired(rootPart: BasePart, animationName: string, isDesired: boolean): ()
+	local desiredByAnimation: { [string]: boolean } = LastObservedDesired[rootPart]
+
+	if not desiredByAnimation then
+		desiredByAnimation = {}
+		LastObservedDesired[rootPart] = desiredByAnimation
+	end
+
+	desiredByAnimation[animationName] = if isDesired then true else nil
+end
+
 local function loadAnimationTrack(
 	characterState: ServerAuthToolkitTypes.CharacterAnimationState,
 	animationName: string,
@@ -269,28 +339,34 @@ local function playAnimationTrack(
 		end
 	end
 
+	local pendingSpeed: number? = consumePendingSpeedOverride(characterState.rootPart, animationName)
+
+	if pendingSpeed == nil then
+		pendingSpeed = GlobalPendingSpeedOverrides[animationName]
+		GlobalPendingSpeedOverrides[animationName] = nil
+	end
+
+	local speed: number = pendingSpeed or animationSettings.Speed
+
 	if animationTrack.IsPlaying then
 		if animationSettings.Looped == true then
 			rememberLoopedTimePosition(characterState.rootPart, animationName, animationTrack)
 			setLoopedTrackWasPlaying(characterState.rootPart, animationName, true)
 		end
 
-		local speed: number = PendingSpeedOverrides[animationName] or animationSettings.Speed
-
 		if speed ~= animationTrack.Speed then
 			animationTrack:AdjustSpeed(speed)
 		end
 
-		if animationSettings.Weight ~= animationTrack.WeightCurrent then
+		-- Compare against the ramp target, not the live weight: while a track is
+		-- fading in, the live weight sits below the target the whole time, and
+		-- re-adjusting every frame cancels the configured fade.
+		if animationSettings.Weight ~= animationTrack.WeightTarget then
 			animationTrack:AdjustWeight(animationSettings.Weight)
 		end
 
-		PendingSpeedOverrides[animationName] = nil
 		return
 	end
-
-	local speed: number = PendingSpeedOverrides[animationName] or animationSettings.Speed
-	PendingSpeedOverrides[animationName] = nil
 
 	local rememberedTimePosition: number? = if animationSettings.Looped == true
 		then getRememberedLoopedTimePosition(characterState.rootPart, animationName)
@@ -363,32 +439,61 @@ local function stopAnimationTrack(
 end
 
 local function syncCharacterAnimationState(characterState: ServerAuthToolkitTypes.CharacterAnimationState): ()
-	local replicateStopsFromAttributes: boolean = not usesLocalAnimationAuthority(characterState.rootPart)
+	local rootPart: BasePart = characterState.rootPart
+	local isAttributeObserver: boolean = IsClient and not usesLocalAnimationAuthority(rootPart)
 
 	for animationName: string, animationSettings: ServerAuthToolkitTypes.AnimationSettings in Animations do
-		local shouldPlay: boolean? = getDesiredAnimationShouldPlay(characterState.rootPart, animationName)
+		local shouldPlay: boolean? = getDesiredAnimationShouldPlay(rootPart, animationName)
 		local animationTrack: AnimationTrack? = characterState.tracks[animationName]
+		local isOneShot: boolean = animationSettings.Looped ~= true
+		local wasDesired: boolean = getLastObservedDesired(rootPart, animationName)
+
+		setLastObservedDesired(rootPart, animationName, shouldPlay == true)
 
 		if shouldPlay == true then
-			if not animationSettings.Looped and characterState.oneShotFinished[animationName] == true then
-				setDesiredAnimationShouldPlay(characterState.rootPart, animationName, nil)
+			local restartRequested: boolean = isOneShot and consumeOneShotRestartRequested(rootPart, animationName)
+
+			if isOneShot and not restartRequested and isAttributeObserver and not wasDesired then
+				restartRequested = true
+			end
+
+			if restartRequested then
+				if not (animationTrack and animationTrack.IsPlaying) then
+					characterState.oneShotFinished[animationName] = nil
+
+					if animationTrack then
+						animationTrack.TimePosition = 0
+					end
+				end
+			end
+
+			if isOneShot and characterState.oneShotFinished[animationName] == true then
+				setDesiredAnimationShouldPlay(rootPart, animationName, nil)
 				continue
 			end
 
 			playAnimationTrack(characterState, animationName, animationSettings)
-		elseif replicateStopsFromAttributes and animationTrack and animationTrack.IsPlaying then
+		elseif animationTrack and animationTrack.IsPlaying then
 			stopAnimationTrack(characterState, animationName, animationSettings)
+
+			if isOneShot then
+				characterState.oneShotFinished[animationName] = true
+			end
 		end
 	end
 end
 
-local function stepAnimationSimulation(_deltaTime: number): ()
+local function reconcileAnimationStates(): ()
 	for rootPart: BasePart, characterState: ServerAuthToolkitTypes.CharacterAnimationState in CharacterStates do
 		if not rootPart.Parent then
 			CharacterStates[rootPart] = nil
 			LocalDesiredAnimations[rootPart] = nil
 			LoopedAnimationTimePositions[rootPart] = nil
 			LoopedTrackWasPlaying[rootPart] = nil
+			PendingSpeedOverrides[rootPart] = nil
+			PendingStopFadeOverrides[rootPart] = nil
+			OneShotRestartRequests[rootPart] = nil
+			LastObservedDesired[rootPart] = nil
 			continue
 		end
 
@@ -396,63 +501,40 @@ local function stepAnimationSimulation(_deltaTime: number): ()
 	end
 end
 
-local function bindAnimationSimulation(): ()
-	if SimulationBound then
+local function bindAnimationReconciliation(): ()
+	if ReconcileBound then
 		return
 	end
 
-	SimulationBound = true
-
-	RunService:BindToSimulation(stepAnimationSimulation, Enum.StepFrequency.Hz60)
+	ReconcileBound = true
+	RunService.PostSimulation:Connect(reconcileAnimationStates)
 end
 
 local function setPlayingAnimationState(rootPart: BasePart?, animationName: string, shouldPlay: boolean?): ()
-	if rootPart then
-		local characterState: ServerAuthToolkitTypes.CharacterAnimationState? = CharacterStates[rootPart]
-
-		if shouldPlay == true and characterState then
-			local animationSettings: ServerAuthToolkitTypes.AnimationSettings? = Animations[animationName]
-			local animationTrack: AnimationTrack? = characterState.tracks[animationName]
-
-			if animationSettings and not animationSettings.Looped and animationTrack then
-				animationTrack.Looped = false
-
-				if animationTrack.IsPlaying then
-					setDesiredAnimationShouldPlay(rootPart, animationName, true)
-					return
-				end
-
-				characterState.oneShotFinished[animationName] = nil
-
-				if animationTrack.IsPlaying then
-					animationTrack:Stop(0)
-				end
-
-				animationTrack.TimePosition = 0
-			end
-		elseif shouldPlay ~= true and characterState then
-			local animationSettings: ServerAuthToolkitTypes.AnimationSettings? = Animations[animationName]
-
-			if animationSettings then
-				stopAnimationTrack(characterState, animationName, animationSettings)
-			end
-
-			if animationSettings and animationSettings.Looped == true then
-				clearLoopedTrackResumeState(rootPart, animationName)
-			elseif animationSettings and not animationSettings.Looped then
-				characterState.oneShotFinished[animationName] = true
-			end
+	if not rootPart then
+		if shouldPlay == true then
+			AlreadyPlayingAnimations[animationName] = true
+		else
+			AlreadyPlayingAnimations[animationName] = nil
 		end
 
-		setDesiredAnimationShouldPlay(rootPart, animationName, if shouldPlay == true then true else nil)
 		return
 	end
 
+	local animationSettings: ServerAuthToolkitTypes.AnimationSettings? = Animations[animationName]
+
 	if shouldPlay == true then
-		AlreadyPlayingAnimations[animationName] = true
+		consumePendingStopFadeOverride(rootPart, animationName)
+
+		if animationSettings and animationSettings.Looped ~= true then
+			setOneShotRestartRequested(rootPart, animationName)
+		end
 	else
-		AlreadyPlayingAnimations[animationName] = nil
+		consumePendingSpeedOverride(rootPart, animationName)
+		consumeOneShotRestartRequested(rootPart, animationName)
 	end
+
+	setDesiredAnimationShouldPlay(rootPart, animationName, if shouldPlay == true then true else nil)
 end
 
 local function applyAlreadyPlayingAnimations(characterState: ServerAuthToolkitTypes.CharacterAnimationState): ()
@@ -498,11 +580,16 @@ function AnimationHelper.PlayAnimation(self: AnimationHelper, animationName: str
 		return
 	end
 
+	local rootPart: BasePart? = ProcessingCharacterState and ProcessingCharacterState.rootPart or nil
+
 	if speedOverride then
-		PendingSpeedOverrides[animationName] = speedOverride
+		if rootPart then
+			setPendingSpeedOverride(rootPart, animationName, speedOverride)
+		else
+			GlobalPendingSpeedOverrides[animationName] = speedOverride
+		end
 	end
 
-	local rootPart: BasePart? = ProcessingCharacterState and ProcessingCharacterState.rootPart or nil
 	setPlayingAnimationState(rootPart, animationName, true)
 end
 
@@ -542,9 +629,7 @@ function AnimationHelper.IsAnimationPlaying(self: AnimationHelper, animationName
 	end
 
 	if ProcessingCharacterState then
-		local animationTrack: AnimationTrack? = ProcessingCharacterState.tracks[animationName]
-
-		return animationTrack ~= nil and animationTrack.IsPlaying
+		return getDesiredAnimationShouldPlay(ProcessingCharacterState.rootPart, animationName) == true
 	end
 
 	return AlreadyPlayingAnimations[animationName] == true
@@ -589,7 +674,7 @@ function AnimationHelper.GetLoadedTrackLength(self: AnimationHelper, rootPart: B
 end
 
 function AnimationHelper.Start(self: AnimationHelper): ()
-	bindAnimationSimulation()
+	bindAnimationReconciliation()
 end
 
 function AnimationHelper.HumanoidAdded(self: AnimationHelper, humanoid: Humanoid): ()
@@ -634,6 +719,10 @@ function AnimationHelper.HumanoidAdded(self: AnimationHelper, humanoid: Humanoid
 		LocalDesiredAnimations[rootPart] = nil
 		LoopedAnimationTimePositions[rootPart] = nil
 		LoopedTrackWasPlaying[rootPart] = nil
+		PendingSpeedOverrides[rootPart] = nil
+		PendingStopFadeOverrides[rootPart] = nil
+		OneShotRestartRequests[rootPart] = nil
+		LastObservedDesired[rootPart] = nil
 	end)
 end
 
